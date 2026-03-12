@@ -117,7 +117,7 @@ class Api::V1::CategoriesController < Api::V1::BaseController
     attrs[:classification] = category_params[:classification] if params[:category]&.key?(:classification)
     attrs[:color]          = category_params[:color]          if params[:category]&.key?(:color)
     attrs[:lucide_icon]    = category_params[:icon]           if params[:category]&.key?(:icon)
-    attrs[:parent_id]      = category_params[:parent_id]      if params[:category]&.key?(:parent_id)
+    attrs[:parent_id]      = category_params[:parent_id].presence if params[:category]&.key?(:parent_id)
 
     if @category.update(attrs)
       @category = current_resource_owner.family.categories.includes(:parent, :subcategories).find(@category.id)
