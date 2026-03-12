@@ -381,7 +381,7 @@ Rails.application.routes.draw do
 
       # Production API endpoints
       resources :accounts, only: [ :index, :show ]
-      resources :categories, only: [ :index, :show, :create, :update ]
+      resources :categories, only: [ :index, :show, :create, :update, :destroy ]
       resources :merchants, only: %i[index show]
       resources :tags, only: %i[index show create update destroy]
 

@@ -2,8 +2,8 @@
 
 class Api::V1::CategoriesController < Api::V1::BaseController
   before_action :ensure_read_scope, only: [ :index, :show ]
-  before_action :ensure_write_scope, only: [ :create, :update ]
-  before_action :set_category, only: [ :show, :update ]
+  before_action :ensure_write_scope, only: [ :create, :update, :destroy ]
+  before_action :set_category, only: [ :show, :update, :destroy ]
 
   def index
     family = current_resource_owner.family
@@ -128,6 +128,25 @@ class Api::V1::CategoriesController < Api::V1::BaseController
 
   rescue => e
     Rails.logger.error "CategoriesController#update error: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+
+    render json: {
+      error: "internal_server_error",
+      message: "Error: #{e.message}"
+    }, status: :internal_server_error
+  end
+
+  def destroy
+    if @category.destroy
+      render json: { message: "Category deleted successfully" }, status: :ok
+    else
+      render json: {
+        error: "category_has_transactions",
+        message: @category.errors.full_messages.to_sentence
+      }, status: :unprocessable_entity
+    end
+  rescue => e
+    Rails.logger.error "CategoriesController#destroy error: #{e.message}"
     Rails.logger.error e.backtrace.join("\n")
 
     render json: {
