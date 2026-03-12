@@ -221,10 +221,10 @@ class Category < ApplicationRecord
 
     def prevent_destroy_if_transactions_exist
       has_transactions = transactions.exists? ||
-        subcategories.any? { |sub| sub.transactions.exists? }
+        Transaction.where(category_id: subcategory_ids).exists?
 
       if has_transactions
-        errors.add(:base, "Cannot delete a category that has transactions linked to it")
+        errors.add(:base, I18n.t("activerecord.errors.models.category.attributes.base.has_transactions"))
         throw(:abort)
       end
     end
