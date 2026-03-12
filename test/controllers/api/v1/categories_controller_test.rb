@@ -530,9 +530,11 @@ class Api::V1::CategoriesControllerTest < ActionDispatch::IntegrationTest
 
   test "destroy returns 422 when category has transactions" do
     # categories(:food_and_drink) is linked to transactions(:one)
-    delete "/api/v1/categories/#{@category.id}", headers: {
-      "Authorization" => "Bearer #{@write_access_token.token}"
-    }
+    assert_no_difference "Category.count" do
+      delete "/api/v1/categories/#{@category.id}", headers: {
+        "Authorization" => "Bearer #{@write_access_token.token}"
+      }
+    end
     assert_response :unprocessable_entity
 
     body = JSON.parse(response.body)

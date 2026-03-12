@@ -145,6 +145,7 @@ class Api::V1::CategoriesController < Api::V1::BaseController
         message: @category.errors.full_messages.to_sentence
       }, status: :unprocessable_entity
     end
+
   rescue => e
     Rails.logger.error "CategoriesController#destroy error: #{e.message}"
     Rails.logger.error e.backtrace.join("\n")
