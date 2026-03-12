@@ -16,6 +16,7 @@ class Category < ApplicationRecord
   validate :nested_category_matches_parent_classification
 
   before_save :inherit_color_from_parent
+  before_destroy :prevent_destroy_if_transactions_exist
 
   scope :alphabetically, -> { order(:name) }
   scope :alphabetically_by_hierarchy, -> {
@@ -215,6 +216,16 @@ class Category < ApplicationRecord
     def nested_category_matches_parent_classification
       if subcategory? && parent.classification != classification
         errors.add(:parent, "must have the same classification as its parent")
+      end
+    end
+
+    def prevent_destroy_if_transactions_exist
+      has_transactions = transactions.exists? ||
+        subcategories.any? { |sub| sub.transactions.exists? }
+
+      if has_transactions
+        errors.add(:base, "Cannot delete a category that has transactions linked to it")
+        throw(:abort)
       end
     end
 
