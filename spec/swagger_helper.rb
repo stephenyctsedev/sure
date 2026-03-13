@@ -281,8 +281,7 @@ RSpec.configure do |config|
               icon: { type: :string, description: 'Lucide icon name', nullable: true },
               parent_id: {
                 type: :string,
-                format: :uuid,
-                description: 'Root category ID to nest under (omit to leave unchanged)',
+                description: 'Root category ID to nest under; pass "empty" (or null/"") to remove the parent (omit to leave unchanged)',
                 nullable: true
               }
             }
