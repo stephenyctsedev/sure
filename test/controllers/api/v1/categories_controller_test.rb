@@ -550,6 +550,21 @@ class Api::V1::CategoriesControllerTest < ActionDispatch::IntegrationTest
     assert_nil @subcategory.reload.parent_id
   end
 
+  test "update should remove parent from subcategory when parent_id is 'empty'" do
+    patch "/api/v1/categories/#{@subcategory.id}",
+      params: { category: { parent_id: "empty" } }.to_json,
+      headers: {
+        "Authorization" => "Bearer #{@write_access_token.token}",
+        "Content-Type" => "application/json"
+      }
+
+    assert_response :ok
+    body = JSON.parse(response.body)
+    assert_nil body["parent"]
+    assert_equal @subcategory.id, body["id"]
+    assert_nil @subcategory.reload.parent_id
+  end
+
   # ── Icons action tests ────────────────────────────────────────────────────
 
   test "icons returns available icon list without authentication" do
