@@ -4,6 +4,9 @@ class Api::V1::CategoriesController < Api::V1::BaseController
   before_action :ensure_read_scope, only: [ :index, :show ]
   before_action :ensure_write_scope, only: [ :create, :update, :destroy ]
   before_action :set_category, only: [ :show, :update, :destroy ]
+  skip_before_action :authenticate_request!, only: [ :icons ]
+  skip_before_action :check_api_key_rate_limit, only: [ :icons ]
+  skip_before_action :log_api_access, only: [ :icons ]
 
   def index
     family = current_resource_owner.family
@@ -88,35 +91,42 @@ class Api::V1::CategoriesController < Api::V1::BaseController
   end
 
   def update
-    if params[:category]&.key?(:parent_id) && category_params[:parent_id].present?
-      family = current_resource_owner.family
-      parent = family.categories.find_by(id: category_params[:parent_id])
-
-      unless parent
-        render json: {
-          error: "validation_failed",
-          message: "Parent category not found"
-        }, status: :unprocessable_entity
-        return
-      end
-
-      if parent.subcategory?
-        render json: {
-          error: "validation_failed",
-          message: "Parent must be a root category"
-        }, status: :unprocessable_entity
-        return
-      end
-    end
-
     attrs = {}
     attrs[:name]           = category_params[:name]           if params[:category]&.key?(:name)
     attrs[:classification] = category_params[:classification] if params[:category]&.key?(:classification)
     attrs[:color]          = category_params[:color]          if params[:category]&.key?(:color)
     attrs[:lucide_icon]    = category_params[:icon]           if params[:category]&.key?(:icon)
-    attrs[:parent_id]      = category_params[:parent_id]      if params[:category]&.key?(:parent_id)
+
+    if params[:category]&.key?(:parent_id)
+      raw_parent_id = category_params[:parent_id]
+      if raw_parent_id == "empty" || raw_parent_id.blank?
+        attrs[:parent_id] = nil
+      else
+        family = current_resource_owner.family
+        parent = family.categories.find_by(id: raw_parent_id)
+
+        unless parent
+          render json: {
+            error: "validation_failed",
+            message: "Parent category not found"
+          }, status: :unprocessable_entity
+          return
+        end
+
+        if parent.subcategory?
+          render json: {
+            error: "validation_failed",
+            message: "Parent must be a root category"
+          }, status: :unprocessable_entity
+          return
+        end
+
+        attrs[:parent_id] = raw_parent_id
+      end
+    end
 
     if @category.update(attrs)
+      @category = current_resource_owner.family.categories.includes(:parent, :subcategories).find(@category.id)
       render :show
     else
       render json: {
@@ -154,6 +164,10 @@ class Api::V1::CategoriesController < Api::V1::BaseController
       error: "internal_server_error",
       message: "Error: #{e.message}"
     }, status: :internal_server_error
+  end
+  
+  def icons
+    render json: { icons: Category.icon_codes }
   end
 
   private

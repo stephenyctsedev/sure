@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.6.9-alpha.5 or 0.7.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Bump version and tag
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update config/initializers/version.rb
+        run: |
+          sed -i 's/"[0-9][0-9a-zA-Z.+-]*"/"${{ github.event.inputs.version }}"/' \
+            config/initializers/version.rb
+
+      - name: Update charts/sure/Chart.yaml
+        run: |
+          sed -i 's/^version: .*/version: ${{ github.event.inputs.version }}/' charts/sure/Chart.yaml
+          sed -i 's/^appVersion: .*/appVersion: "${{ github.event.inputs.version }}"/' charts/sure/Chart.yaml
+
+      - name: Update mobile/pubspec.yaml
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          sed -i "s/^version: .*/version: ${{ github.event.inputs.version }}+${SHA}/" mobile/pubspec.yaml
+
+      - name: Commit version bump
+        run: |
+          git add config/initializers/version.rb charts/sure/Chart.yaml mobile/pubspec.yaml
+          git commit -m "Bump version to v${{ github.event.inputs.version }}"
+
+      - name: Create and push tag
+        run: |
+          git tag "v${{ github.event.inputs.version }}"
+          git push origin HEAD
+          git push origin "v${{ github.event.inputs.version }}"

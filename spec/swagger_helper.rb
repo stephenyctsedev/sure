@@ -245,6 +245,17 @@ RSpec.configure do |config|
               }
             }
           },
+          CategoryIconsResponse: {
+            type: :object,
+            required: %w[icons],
+            properties: {
+              icons: {
+                type: :array,
+                description: 'List of valid Lucide icon names for use in categories',
+                items: { type: :string }
+              }
+            }
+          },
           CreateCategoryRequest: {
             type: :object,
             required: %w[name classification],
@@ -270,8 +281,7 @@ RSpec.configure do |config|
               icon: { type: :string, description: 'Lucide icon name', nullable: true },
               parent_id: {
                 type: :string,
-                format: :uuid,
-                description: 'Root category ID to nest under (omit to leave unchanged)',
+                description: 'Root category ID to nest under; pass "empty" (or null/"") to remove the parent (omit to leave unchanged)',
                 nullable: true
               }
             }
