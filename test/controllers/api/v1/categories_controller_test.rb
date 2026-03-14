@@ -599,6 +599,8 @@ class Api::V1::CategoriesControllerTest < ActionDispatch::IntegrationTest
     assert_response :ok
     child.reload
     assert_nil child.parent_id, "Subcategory should become a root category after parent is deleted"
+  end
+
   test "update should assign parent to a root category (root → subcategory)" do
     new_parent = @user.family.categories.create!(
       name: "Big Expense",
