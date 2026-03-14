@@ -37,6 +37,11 @@ class ChatsTest < ApplicationSystemTestCase
 
       click_on @user.chats.first.title
 
+      # Wait for the frame to load the chat view, confirming last_viewed_chat was persisted
+      within "#chat-container" do
+        assert_selector "h1", text: @user.chats.first.title
+      end
+
       # Page refresh
       visit root_url
 
