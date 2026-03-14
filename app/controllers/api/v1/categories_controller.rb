@@ -165,7 +165,7 @@ class Api::V1::CategoriesController < Api::V1::BaseController
       message: "Error: #{e.message}"
     }, status: :internal_server_error
   end
-  
+
   def icons
     render json: { icons: Category.icon_codes }
   end
