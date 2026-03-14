@@ -16,7 +16,7 @@ class Category < ApplicationRecord
   validate :nested_category_matches_parent_classification
 
   before_save :inherit_color_from_parent
-  before_destroy :prevent_destroy_if_transactions_exist
+  before_destroy :prevent_destroy_if_transactions_exist, prepend: true
 
   scope :alphabetically, -> { order(:name) }
   scope :alphabetically_by_hierarchy, -> {
