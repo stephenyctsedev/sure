@@ -205,6 +205,51 @@ RSpec.describe 'API V1 Categories', type: :request do
         run_test!
       end
     end
+
+    delete 'Delete a category' do
+      tags 'Categories'
+      security [ { apiKeyAuth: [] } ]
+      produces 'application/json'
+
+      let(:id) { income_category.id }
+
+      response '200', 'category deleted' do
+        schema '$ref' => '#/components/schemas/DeleteResponse'
+
+        run_test!
+      end
+
+      response '404', 'category not found' do
+        schema '$ref' => '#/components/schemas/ErrorResponse'
+
+        let(:id) { SecureRandom.uuid }
+
+        run_test!
+      end
+
+      response '422', 'category has linked transactions' do
+        schema '$ref' => '#/components/schemas/ErrorResponse'
+
+        let(:id) { parent_category.id }
+
+        before do
+          account = family.accounts.create!(
+            name: 'Test Account',
+            accountable: Depository.new,
+            currency: 'USD'
+          )
+          account.entries.create!(
+            name: 'Linked tx',
+            date: Date.today,
+            amount: 10,
+            currency: 'USD',
+            entryable: Transaction.new(category: parent_category)
+          )
+        end
+
+        run_test!
+      end
+    end
   end
 
   path '/api/v1/categories/icons' do

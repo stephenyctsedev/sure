@@ -1,5 +1,12 @@
 ---
 en:
+  activerecord:
+    errors:
+      models:
+        category:
+          attributes:
+            base:
+              has_transactions: "Cannot delete a category that has transactions linked to it"
   models:
     category:
       uncategorized: Uncategorized

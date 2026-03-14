@@ -492,6 +492,115 @@ class Api::V1::CategoriesControllerTest < ActionDispatch::IntegrationTest
     assert_match /Parent category not found/, body["message"]
   end
 
+  # ── Destroy action tests ───────────────────────────────────────────────────
+
+  test "destroy requires authentication" do
+    delete "/api/v1/categories/#{@category.id}"
+    assert_response :unauthorized
+
+    body = JSON.parse(response.body)
+    assert_equal "unauthorized", body["error"]
+  end
+
+  test "destroy requires write scope" do
+    delete "/api/v1/categories/#{@category.id}", headers: {
+      "Authorization" => "Bearer #{@access_token.token}"
+    }
+    assert_response :forbidden
+  end
+
+  test "destroy returns 404 for unknown category" do
+    delete "/api/v1/categories/00000000-0000-0000-0000-000000000000", headers: {
+      "Authorization" => "Bearer #{@write_access_token.token}"
+    }
+    assert_response :not_found
+
+    body = JSON.parse(response.body)
+    assert_equal "not_found", body["error"]
+  end
+
+  test "destroy returns 404 for another family's category" do
+    other_category = categories(:one) # belongs to :empty family
+
+    delete "/api/v1/categories/#{other_category.id}", headers: {
+      "Authorization" => "Bearer #{@write_access_token.token}"
+    }
+    assert_response :not_found
+  end
+
+  test "destroy returns 422 when category has transactions" do
+    # categories(:food_and_drink) is linked to transactions(:one)
+    assert_no_difference "Category.count" do
+      delete "/api/v1/categories/#{@category.id}", headers: {
+        "Authorization" => "Bearer #{@write_access_token.token}"
+      }
+    end
+    assert_response :unprocessable_entity
+
+    body = JSON.parse(response.body)
+    assert_equal "category_has_transactions", body["error"]
+    assert_match /Cannot delete a category/, body["message"]
+  end
+
+  test "destroy returns 422 when a subcategory has transactions" do
+    entry = accounts(:depository).entries.create!(
+      name: "Sub tx",
+      date: Date.today,
+      amount: 10,
+      currency: "USD",
+      entryable: Transaction.new(category: @subcategory)
+    )
+
+    parent = @subcategory.parent
+    delete "/api/v1/categories/#{parent.id}", headers: {
+      "Authorization" => "Bearer #{@write_access_token.token}"
+    }
+    assert_response :unprocessable_entity
+
+    body = JSON.parse(response.body)
+    assert_equal "category_has_transactions", body["error"]
+  ensure
+    entry&.destroy
+  end
+
+  test "destroy succeeds when category has no transactions" do
+    income = categories(:income)
+
+    assert_difference "Category.count", -1 do
+      delete "/api/v1/categories/#{income.id}", headers: {
+        "Authorization" => "Bearer #{@write_access_token.token}"
+      }
+    end
+
+    assert_response :ok
+    body = JSON.parse(response.body)
+    assert_equal "Category deleted successfully", body["message"]
+  end
+
+  test "destroy nullifies subcategory parent_ids when parent has no transactions" do
+    parent = @user.family.categories.create!(
+      name: "Empty Parent",
+      classification: "expense",
+      color: "#aabbcc",
+      lucide_icon: "shapes"
+    )
+    child = @user.family.categories.create!(
+      name: "Empty Child",
+      classification: "expense",
+      color: "#aabbcc",
+      lucide_icon: "shapes",
+      parent: parent
+    )
+
+    delete "/api/v1/categories/#{parent.id}", headers: {
+      "Authorization" => "Bearer #{@write_access_token.token}"
+    }
+
+    assert_response :ok
+    child.reload
+    assert_nil child.parent_id, "Subcategory should become a root category after parent is deleted"
+  end
+
   test "update should assign parent to a root category (root → subcategory)" do
     new_parent = @user.family.categories.create!(
       name: "Big Expense",

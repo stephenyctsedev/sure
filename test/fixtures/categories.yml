@@ -4,7 +4,9 @@ one:
 
 income:
   name: Income
+  classification: income
   color: "#fd7f6f"
+  lucide_icon: circle-dollar-sign
   family: dylan_family
 
 food_and_drink:
