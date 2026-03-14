@@ -203,11 +203,10 @@ RSpec.configure do |config|
           },
           Category: {
             type: :object,
-            required: %w[id name classification color icon],
+            required: %w[id name color icon],
             properties: {
               id: { type: :string, format: :uuid },
               name: { type: :string },
-              classification: { type: :string },
               color: { type: :string },
               icon: { type: :string }
             }
@@ -222,11 +221,10 @@ RSpec.configure do |config|
           },
           CategoryDetail: {
             type: :object,
-            required: %w[id name classification color icon subcategories_count created_at updated_at],
+            required: %w[id name color icon subcategories_count created_at updated_at],
             properties: {
               id: { type: :string, format: :uuid },
               name: { type: :string },
-              classification: { type: :string, enum: %w[income expense] },
               color: { type: :string },
               icon: { type: :string },
               parent: { '$ref' => '#/components/schemas/CategoryParent', nullable: true },
@@ -237,53 +235,13 @@ RSpec.configure do |config|
           },
           CategoryCollection: {
             type: :object,
-            required: %w[categories],
+            required: %w[categories pagination],
             properties: {
               categories: {
                 type: :array,
                 items: { '$ref' => '#/components/schemas/CategoryDetail' }
-              }
-            }
-          },
-          CategoryIconsResponse: {
-            type: :object,
-            required: %w[icons],
-            properties: {
-              icons: {
-                type: :array,
-                description: 'List of valid Lucide icon names for use in categories',
-                items: { type: :string }
-              }
-            }
-          },
-          CreateCategoryRequest: {
-            type: :object,
-            required: %w[name classification],
-            properties: {
-              name: { type: :string, description: 'Category name' },
-              classification: { type: :string, enum: %w[income expense], description: 'income or expense' },
-              color: { type: :string, description: 'Hex color string (e.g. #6172F3)', nullable: true },
-              icon: { type: :string, description: 'Lucide icon name (e.g. shapes)', nullable: true },
-              parent_id: {
-                type: :string,
-                format: :uuid,
-                description: 'ID of a root category to nest under',
-                nullable: true
-              }
-            }
-          },
-          UpdateCategoryRequest: {
-            type: :object,
-            properties: {
-              name: { type: :string, description: 'Category name', nullable: true },
-              classification: { type: :string, enum: %w[income expense], nullable: true },
-              color: { type: :string, description: 'Hex color string', nullable: true },
-              icon: { type: :string, description: 'Lucide icon name', nullable: true },
-              parent_id: {
-                type: :string,
-                description: 'Root category ID to nest under; pass "empty" (or null/"") to remove the parent (omit to leave unchanged)',
-                nullable: true
-              }
+              },
+              pagination: { '$ref' => '#/components/schemas/Pagination' }
             }
           },
           Merchant: {

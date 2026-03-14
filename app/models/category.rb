@@ -10,10 +10,8 @@ class Category < ApplicationRecord
 
   validates :name, :color, :lucide_icon, :family, presence: true
   validates :name, uniqueness: { scope: :family_id }
-  validates :classification, inclusion: { in: %w[income expense] }
 
   validate :category_level_limit
-  validate :nested_category_matches_parent_classification
 
   before_save :inherit_color_from_parent
 
@@ -25,8 +23,9 @@ class Category < ApplicationRecord
       .order(:name)
   }
   scope :roots, -> { where(parent_id: nil) }
-  scope :incomes, -> { where(classification: "income") }
-  scope :expenses, -> { where(classification: "expense") }
+  # Legacy scopes - classification removed; these now return all categories
+  scope :incomes, -> { all }
+  scope :expenses, -> { all }
 
   COLORS = %w[#e99537 #4da568 #6471eb #db5a54 #df4e92 #c44fe9 #eb5429 #61c9ea #805dee #6ad28a]
 
@@ -61,10 +60,10 @@ class Category < ApplicationRecord
   class << self
     def icon_codes
       %w[
-        ambulance apple award arrow-right arrow-right-left baby badge-dollar-sign banknote barcode bar-chart-3 bath
+        ambulance apple award baby badge-dollar-sign banknote barcode bar-chart-3 bath
         battery bed-single beer bike bluetooth bone book book-open briefcase building bus
         cake calculator calendar-heart calendar-range camera car cat chart-line
-        circle-dollar-sign circle-dashed circle-parking coffee coins compass cookie cooking-pot
+        circle-dollar-sign circle-parking coffee coins compass cookie cooking-pot
         credit-card dices dog drama drill droplet drum dumbbell film flame flower flower-2
         fuel gamepad-2 gem gift glasses globe graduation-cap hammer hand-heart
         hand-helping heart-handshake handshake headphones heart heart-pulse home hotel
@@ -80,10 +79,9 @@ class Category < ApplicationRecord
     end
 
     def bootstrap!
-      default_categories.each do |name, color, icon, classification|
+      default_categories.each do |name, color, icon|
         find_or_create_by!(name: name) do |category|
           category.color = color
-          category.classification = classification
           category.lucide_icon = icon
         end
       end
@@ -139,28 +137,28 @@ class Category < ApplicationRecord
     private
       def default_categories
         [
-          [ "Income", "#22c55e", "circle-dollar-sign", "income" ],
-          [ "Food & Drink", "#f97316", "utensils", "expense" ],
-          [ "Groceries", "#407706", "shopping-bag", "expense" ],
-          [ "Shopping", "#3b82f6", "shopping-cart", "expense" ],
-          [ "Transportation", "#0ea5e9", "bus", "expense" ],
-          [ "Travel", "#2563eb", "plane", "expense" ],
-          [ "Entertainment", "#a855f7", "drama", "expense" ],
-          [ "Healthcare", "#4da568", "pill", "expense" ],
-          [ "Personal Care", "#14b8a6", "scissors", "expense" ],
-          [ "Home Improvement", "#d97706", "hammer", "expense" ],
-          [ "Mortgage / Rent", "#b45309", "home", "expense" ],
-          [ "Utilities", "#eab308", "lightbulb", "expense" ],
-          [ "Subscriptions", "#6366f1", "wifi", "expense" ],
-          [ "Insurance", "#0284c7", "shield", "expense" ],
-          [ "Sports & Fitness", "#10b981", "dumbbell", "expense" ],
-          [ "Gifts & Donations", "#61c9ea", "hand-helping", "expense" ],
-          [ "Taxes", "#dc2626", "landmark", "expense" ],
-          [ "Loan Payments", "#e11d48", "credit-card", "expense" ],
-          [ "Services", "#7c3aed", "briefcase", "expense" ],
-          [ "Fees", "#6b7280", "receipt", "expense" ],
-          [ "Savings & Investments", "#059669", "piggy-bank", "expense" ],
-          [ investment_contributions_name, "#0d9488", "trending-up", "expense" ]
+          [ "Income", "#22c55e", "circle-dollar-sign" ],
+          [ "Food & Drink", "#f97316", "utensils" ],
+          [ "Groceries", "#407706", "shopping-bag" ],
+          [ "Shopping", "#3b82f6", "shopping-cart" ],
+          [ "Transportation", "#0ea5e9", "bus" ],
+          [ "Travel", "#2563eb", "plane" ],
+          [ "Entertainment", "#a855f7", "drama" ],
+          [ "Healthcare", "#4da568", "pill" ],
+          [ "Personal Care", "#14b8a6", "scissors" ],
+          [ "Home Improvement", "#d97706", "hammer" ],
+          [ "Mortgage / Rent", "#b45309", "home" ],
+          [ "Utilities", "#eab308", "lightbulb" ],
+          [ "Subscriptions", "#6366f1", "wifi" ],
+          [ "Insurance", "#0284c7", "shield" ],
+          [ "Sports & Fitness", "#10b981", "dumbbell" ],
+          [ "Gifts & Donations", "#61c9ea", "hand-helping" ],
+          [ "Taxes", "#dc2626", "landmark" ],
+          [ "Loan Payments", "#e11d48", "credit-card" ],
+          [ "Services", "#7c3aed", "briefcase" ],
+          [ "Fees", "#6b7280", "receipt" ],
+          [ "Savings & Investments", "#059669", "piggy-bank" ],
+          [ investment_contributions_name, "#0d9488", "trending-up" ]
         ]
       end
   end
@@ -183,7 +181,7 @@ class Category < ApplicationRecord
   end
 
   def subcategory?
-    parent_id.present?
+    parent.present?
   end
 
   def name_with_parent
@@ -209,12 +207,6 @@ class Category < ApplicationRecord
     def category_level_limit
       if (subcategory? && parent.subcategory?) || (parent? && subcategory?)
         errors.add(:parent, "can't have more than 2 levels of subcategories")
-      end
-    end
-
-    def nested_category_matches_parent_classification
-      if subcategory? && parent.classification != classification
-        errors.add(:parent, "must have the same classification as its parent")
       end
     end
 

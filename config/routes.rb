@@ -381,15 +381,11 @@ Rails.application.routes.draw do
 
       # Production API endpoints
       resources :accounts, only: [ :index, :show ]
-      resources :categories, only: [ :index, :show, :create, :update ] do
-        get :icons, on: :collection
-      end
+      resources :categories, only: [ :index, :show ]
       resources :merchants, only: %i[index show]
       resources :tags, only: %i[index show create update destroy]
 
-      resources :transactions, only: [ :index, :show, :create, :update, :destroy ] do
-        resource :transfer, only: [ :update ], controller: "transaction_transfers"
-      end
+      resources :transactions, only: [ :index, :show, :create, :update, :destroy ]
       resources :trades, only: [ :index, :show, :create, :update, :destroy ]
       resources :holdings, only: [ :index, :show ]
       resources :valuations, only: [ :create, :update, :show ]
@@ -509,6 +505,12 @@ Rails.application.routes.draw do
       end
     end
     resources :users, only: [ :index, :update ]
+    resources :invitations, only: [ :destroy ]
+    resources :families, only: [] do
+      member do
+        delete :invitations, to: "invitations#destroy_all"
+      end
+    end
   end
 
   # Defines the root path route ("/")
