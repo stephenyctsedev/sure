@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   release:
@@ -51,3 +52,15 @@ jobs:
           git tag "v${{ github.event.inputs.version }}"
           git push origin HEAD
           git push origin "v${{ github.event.inputs.version }}"
+
+  publish:
+    name: Publish Docker image
+    needs: [release]
+    uses: ./.github/workflows/publish.yml
+    with:
+      ref: "v${{ github.event.inputs.version }}"
+      push: true
+    secrets: inherit
+    permissions:
+      contents: write
+      packages: write
