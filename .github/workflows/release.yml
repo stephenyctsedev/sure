@@ -28,7 +28,7 @@ jobs:
 
       - name: Update config/initializers/version.rb
         run: |
-          sed -i 's/"[^"]*"/"${{ github.event.inputs.version }}"/' \
+          sed -i '/def semver/,/end/{s/"[^"]*"/"${{ github.event.inputs.version }}"/}' \
             config/initializers/version.rb
 
       - name: Update charts/sure/Chart.yaml
