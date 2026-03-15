@@ -1,7 +1,7 @@
 name: sure_mobile
 description: A mobile app for Sure personal finance management
 publish_to: 'none'
-version: 0.6.9.4-fix4+1aa32cc
+version: 0.6.9.4-fix5+61d63c4
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
