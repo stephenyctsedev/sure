@@ -16,7 +16,7 @@ module Sure
 
     private
       def semver
-        "test"
+        "0.6.9.4-fix2"
       end
   end
 end
