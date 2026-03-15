@@ -6,7 +6,7 @@ module Sure
 
     def commit_sha
       if Rails.env.production?
-        ENV["BUILD_COMMIT_SHA"]
+        ENV["0.6.9.4-fix3"]
       else
         `git rev-parse HEAD`.chomp
       end
@@ -16,7 +16,7 @@ module Sure
 
     private
       def semver
-        "0.6.9.4-fix2"
+        "0.6.9.4-fix3"
       end
   end
 end
