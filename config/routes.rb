@@ -387,7 +387,7 @@ Rails.application.routes.draw do
       patch "auth/enable_ai", to: "auth#enable_ai"
 
       # Production API endpoints
-      resources :accounts, only: [ :index, :show ]
+      resources :accounts, only: [ :index, :show, :create, :update ]
       resources :categories, only: [ :index, :show, :create, :update, :destroy ] do
         get :icons, on: :collection
       end

@@ -180,14 +180,45 @@ RSpec.configure do |config|
           },
           AccountDetail: {
             type: :object,
-            required: %w[id name balance currency classification account_type],
+            required: %w[id name balance currency classification account_type status created_at updated_at],
             properties: {
               id: { type: :string, format: :uuid },
               name: { type: :string },
               balance: { type: :string },
               currency: { type: :string },
-              classification: { type: :string },
-              account_type: { type: :string }
+              classification: { type: :string, enum: %w[asset liability], nullable: true },
+              account_type: { type: :string },
+              institution_name: { type: :string, nullable: true },
+              notes: { type: :string, nullable: true },
+              status: { type: :string },
+              created_at: { type: :string, format: :'date-time' },
+              updated_at: { type: :string, format: :'date-time' }
+            }
+          },
+          CreateAccountRequest: {
+            type: :object,
+            required: %w[name accountable_type],
+            properties: {
+              name: { type: :string, description: 'Account name' },
+              accountable_type: {
+                type: :string,
+                enum: %w[Depository Investment Crypto Property Vehicle OtherAsset CreditCard Loan OtherLiability],
+                description: 'Account type'
+              },
+              balance: { type: :number, description: 'Opening balance (default: 0)' },
+              currency: { type: :string, description: 'ISO 4217 currency code (defaults to family currency)' },
+              institution_name: { type: :string, nullable: true, description: 'Name of the financial institution' },
+              notes: { type: :string, nullable: true, description: 'Optional notes' },
+              opening_balance_date: { type: :string, format: :date, nullable: true, description: 'Date for the opening balance entry' }
+            }
+          },
+          UpdateAccountRequest: {
+            type: :object,
+            properties: {
+              name: { type: :string, description: 'Account name' },
+              balance: { type: :number, description: 'New current balance' },
+              institution_name: { type: :string, nullable: true, description: 'Name of the financial institution' },
+              notes: { type: :string, nullable: true, description: 'Optional notes' }
             }
           },
           AccountCollection: {
