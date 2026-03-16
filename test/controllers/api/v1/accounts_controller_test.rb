@@ -214,4 +214,181 @@ end
     account_names = response_body["accounts"].map { |a| a["name"] }
     assert_equal account_names.sort, account_names
   end
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # show
+  # ──────────────────────────────────────────────────────────────────────────
+
+  test "show should return account detail" do
+    account = accounts(:depository)
+    access_token = Doorkeeper::AccessToken.create!(
+      application: @oauth_app,
+      resource_owner_id: @user.id,
+      scopes: "read"
+    )
+
+    get "/api/v1/accounts/#{account.id}", headers: {
+      "Authorization" => "Bearer #{access_token.token}"
+    }
+
+    assert_response :success
+    body = JSON.parse(response.body)
+
+    assert_equal account.id, body["id"]
+    assert_equal account.name, body["name"]
+    assert body.key?("balance")
+    assert body.key?("currency")
+    assert body.key?("classification")
+    assert body.key?("account_type")
+    assert body.key?("status")
+  end
+
+  test "show should return 404 for unknown account" do
+    access_token = Doorkeeper::AccessToken.create!(
+      application: @oauth_app,
+      resource_owner_id: @user.id,
+      scopes: "read"
+    )
+
+    get "/api/v1/accounts/#{SecureRandom.uuid}", headers: {
+      "Authorization" => "Bearer #{access_token.token}"
+    }
+
+    assert_response :not_found
+  end
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # create
+  # ──────────────────────────────────────────────────────────────────────────
+
+  test "create should require write scope" do
+    access_token = Doorkeeper::AccessToken.create!(
+      application: @oauth_app,
+      resource_owner_id: @user.id,
+      scopes: "read"
+    )
+
+    post "/api/v1/accounts",
+      params: { account: { name: "Test", accountable_type: "Depository", balance: 100, currency: "USD" } }.to_json,
+      headers: { "Authorization" => "Bearer #{access_token.token}", "Content-Type" => "application/json" }
+
+    assert_response :forbidden
+  end
+
+  test "create should create a manual account" do
+    access_token = Doorkeeper::AccessToken.create!(
+      application: @oauth_app,
+      resource_owner_id: @user.id,
+      scopes: "read_write"
+    )
+
+    assert_difference "@user.family.accounts.count", 1 do
+      post "/api/v1/accounts",
+        params: { account: { name: "New Savings", accountable_type: "Depository", balance: 1000, currency: "USD" } }.to_json,
+        headers: { "Authorization" => "Bearer #{access_token.token}", "Content-Type" => "application/json" }
+    end
+
+    assert_response :created
+    body = JSON.parse(response.body)
+
+    assert_equal "New Savings", body["name"]
+    assert_equal "depository", body["account_type"]
+    assert_equal "USD", body["currency"]
+    assert body.key?("id")
+  end
+
+  test "create should return 422 for invalid account type" do
+    access_token = Doorkeeper::AccessToken.create!(
+      application: @oauth_app,
+      resource_owner_id: @user.id,
+      scopes: "read_write"
+    )
+
+    post "/api/v1/accounts",
+      params: { account: { name: "Bad", accountable_type: "InvalidType", balance: 0, currency: "USD" } }.to_json,
+      headers: { "Authorization" => "Bearer #{access_token.token}", "Content-Type" => "application/json" }
+
+    assert_response :unprocessable_entity
+    body = JSON.parse(response.body)
+    assert_equal "validation_failed", body["error"]
+  end
+
+  test "create should return 422 when name is missing" do
+    access_token = Doorkeeper::AccessToken.create!(
+      application: @oauth_app,
+      resource_owner_id: @user.id,
+      scopes: "read_write"
+    )
+
+    post "/api/v1/accounts",
+      params: { account: { accountable_type: "Depository", balance: 0, currency: "USD" } }.to_json,
+      headers: { "Authorization" => "Bearer #{access_token.token}", "Content-Type" => "application/json" }
+
+    assert_response :unprocessable_entity
+  end
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # update
+  # ──────────────────────────────────────────────────────────────────────────
+
+  test "update should require write scope" do
+    account = accounts(:depository)
+    access_token = Doorkeeper::AccessToken.create!(
+      application: @oauth_app,
+      resource_owner_id: @user.id,
+      scopes: "read"
+    )
+
+    patch "/api/v1/accounts/#{account.id}",
+      params: { account: { name: "Renamed" } }.to_json,
+      headers: { "Authorization" => "Bearer #{access_token.token}", "Content-Type" => "application/json" }
+
+    assert_response :forbidden
+  end
+
+  test "update should rename account" do
+    account = accounts(:depository)
+    access_token = Doorkeeper::AccessToken.create!(
+      application: @oauth_app,
+      resource_owner_id: @user.id,
+      scopes: "read_write"
+    )
+
+    patch "/api/v1/accounts/#{account.id}",
+      params: { account: { name: "Renamed Checking" } }.to_json,
+      headers: { "Authorization" => "Bearer #{access_token.token}", "Content-Type" => "application/json" }
+
+    assert_response :success
+    body = JSON.parse(response.body)
+    assert_equal "Renamed Checking", body["name"]
+  end
+
+  test "update should return 404 for unknown account" do
+    access_token = Doorkeeper::AccessToken.create!(
+      application: @oauth_app,
+      resource_owner_id: @user.id,
+      scopes: "read_write"
+    )
+
+    patch "/api/v1/accounts/#{SecureRandom.uuid}",
+      params: { account: { name: "X" } }.to_json,
+      headers: { "Authorization" => "Bearer #{access_token.token}", "Content-Type" => "application/json" }
+
+    assert_response :not_found
+  end
+
+  test "update should not allow access to other family's account" do
+    account = accounts(:depository) # belongs to dylan_family
+    other_token = Doorkeeper::AccessToken.create!(
+      application: @oauth_app,
+      resource_owner_id: @other_family_user.id,
+      scopes: "read_write"
+    )
+
+    patch "/api/v1/accounts/#{account.id}",
+      params: { account: { name: "Hijack" } }.to_json,
+      headers: { "Authorization" => "Bearer #{other_token.token}", "Content-Type" => "application/json" }
+
+    assert_response :not_found
+  end
 end

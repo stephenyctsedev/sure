@@ -88,5 +88,108 @@ RSpec.describe 'API V1 Accounts', type: :request do
         run_test!
       end
     end
+
+    post 'Create an account' do
+      tags 'Accounts'
+      security [ { apiKeyAuth: [] } ]
+      consumes 'application/json'
+      produces 'application/json'
+      parameter name: :body, in: :body, required: true, schema: {
+        '$ref' => '#/components/schemas/CreateAccountRequest'
+      }
+
+      response '201', 'account created' do
+        schema '$ref' => '#/components/schemas/AccountDetail'
+
+        let(:body) do
+          { account: { name: 'New Checking', accountable_type: 'Depository', balance: 500, currency: 'USD' } }
+        end
+
+        run_test!
+      end
+
+      response '422', 'validation failed' do
+        schema '$ref' => '#/components/schemas/ErrorResponse'
+
+        let(:body) do
+          { account: { name: 'Bad', accountable_type: 'InvalidType', balance: 0, currency: 'USD' } }
+        end
+
+        run_test!
+      end
+
+      response '401', 'unauthorized' do
+        schema '$ref' => '#/components/schemas/ErrorResponse'
+
+        let(:'X-Api-Key') { 'invalid-key' }
+        let(:body) { { account: { name: 'X', accountable_type: 'Depository' } } }
+
+        run_test!
+      end
+    end
+  end
+
+  path '/api/v1/accounts/{id}' do
+    parameter name: :id, in: :path, type: :string, required: true, description: 'Account ID'
+
+    get 'Retrieve an account' do
+      tags 'Accounts'
+      security [ { apiKeyAuth: [] } ]
+      produces 'application/json'
+
+      let(:id) { checking_account.id }
+
+      response '200', 'account retrieved' do
+        schema '$ref' => '#/components/schemas/AccountDetail'
+
+        run_test!
+      end
+
+      response '404', 'account not found' do
+        schema '$ref' => '#/components/schemas/ErrorResponse'
+
+        let(:id) { SecureRandom.uuid }
+
+        run_test!
+      end
+    end
+
+    patch 'Update an account' do
+      tags 'Accounts'
+      security [ { apiKeyAuth: [] } ]
+      consumes 'application/json'
+      produces 'application/json'
+      parameter name: :body, in: :body, required: true, schema: {
+        '$ref' => '#/components/schemas/UpdateAccountRequest'
+      }
+
+      let(:id) { checking_account.id }
+
+      response '200', 'account updated' do
+        schema '$ref' => '#/components/schemas/AccountDetail'
+
+        let(:body) { { account: { name: 'Updated Checking' } } }
+
+        run_test!
+      end
+
+      response '404', 'account not found' do
+        schema '$ref' => '#/components/schemas/ErrorResponse'
+
+        let(:id) { SecureRandom.uuid }
+        let(:body) { { account: { name: 'X' } } }
+
+        run_test!
+      end
+
+      response '401', 'unauthorized' do
+        schema '$ref' => '#/components/schemas/ErrorResponse'
+
+        let(:'X-Api-Key') { 'invalid-key' }
+        let(:body) { { account: { name: 'X' } } }
+
+        run_test!
+      end
+    end
   end
 end
