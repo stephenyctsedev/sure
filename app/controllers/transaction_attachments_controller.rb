@@ -4,7 +4,12 @@ class TransactionAttachmentsController < ApplicationController
 
   def show
     disposition = params[:disposition] == "attachment" ? "attachment" : "inline"
-    redirect_to rails_blob_url(@attachment, disposition: disposition)
+
+    if @attachment.blob.service.exist?(@attachment.blob.key)
+      redirect_to rails_blob_url(@attachment, disposition: disposition)
+    else
+      redirect_to transaction_path(@transaction), alert: t("transactions.attachments.file_not_found")
+    end
   end
 
   def create
