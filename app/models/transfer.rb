@@ -13,6 +13,30 @@ class Transfer < ApplicationRecord
   validate :transfer_has_same_family
 
   class << self
+    # Links two transactions as a confirmed transfer.
+    # Determines inflow/outflow based on entry amount sign (negative = inflow).
+    def link!(transaction_a, transaction_b)
+      if transaction_a.entry.amount.negative?
+        inflow_txn  = transaction_a
+        outflow_txn = transaction_b
+      else
+        inflow_txn  = transaction_b
+        outflow_txn = transaction_a
+      end
+
+      transfer = Transfer.create!(
+        inflow_transaction:  inflow_txn,
+        outflow_transaction: outflow_txn,
+        status: "confirmed"
+      )
+
+      kind = Transfer.kind_for_account(outflow_txn.entry.account)
+      inflow_txn.update!(kind: kind)
+      outflow_txn.update!(kind: kind)
+
+      transfer
+    end
+
     def kind_for_account(account)
       if account.loan?
         "loan_payment"

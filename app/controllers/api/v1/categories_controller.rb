@@ -203,6 +203,10 @@ class Api::V1::CategoriesController < Api::V1::BaseController
       authorize_scope!(:write)
     end
 
+    def category_params
+      params.require(:category).permit(:name, :classification, :color, :icon, :parent_id)
+    end
+
     def apply_filters(query)
       # Filter for root categories only (no parent)
       if params[:roots_only].present? && ActiveModel::Type::Boolean.new.cast(params[:roots_only])
