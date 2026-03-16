@@ -93,3 +93,36 @@ The system revolves around a few core concepts:
 - **API Endpoints**: A versioned JSON API is provided under `/api/v1` for the mobile app and external clients.
 - **Background Jobs**: `Sidekiq` is used for long-running tasks like data synchronization and report generation.
 - **Dependency Injection**: Some services and controllers show signs of dependency injection, especially for external API clients.
+
+## 8. Recently Updated Features (v0.6.9.6+)
+
+### Balance Calculation Optimization
+- **Incremental ForwardCalculator**: Optimized balance recalculation to only update from the changed date forward, improving performance for large accounts.
+- Location: `app/models/balance/forward_calculator.rb`
+
+### Account Management
+- **Default User Account**: New feature to designate and manage default user accounts.
+- **Consolidated Account Actions**: Account actions (create, edit, delete) consolidated in unified menu for better UX.
+- Location: `app/controllers/accounts_controller.rb`, `app/components/DS/menu.html.erb`
+
+### Transaction Management
+- **Duplicate Transaction Feature**: Users can now duplicate selected transactions for quick creation of similar entries.
+- **Transfer API Enhancement**: Added `Transfer.link!` class method for better transaction transfer API support.
+- Location: `app/controllers/transactions_controller.rb`, `app/models/transfer.rb`
+
+### Attachment & Storage
+- **Attachment Download Fix**: Resolved 404 errors on attachment downloads when storage files are missing with better error handling.
+- Location: `app/controllers/transaction_attachments_controller.rb`
+
+### Import System
+- **CSV Import Improvements**: Enhanced import workflow with better category selection and data cleaning.
+- Location: `app/controllers/import/*_controller.rb`
+
+### API & Categories
+- **Categories API**: Improvements to the Categories API controller for better data validation and consistency.
+- Location: `app/controllers/api/v1/categories_controller.rb`
+
+### Workflow & Admin
+- **Pending Duplicate Merges**: System for managing and resolving duplicate transaction detection.
+- **Archived Exports**: Management of exported data archives.
+- Location: `app/controllers/pending_duplicate_merges_controller.rb`, `app/controllers/archived_exports_controller.rb`
