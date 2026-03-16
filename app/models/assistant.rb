@@ -28,8 +28,7 @@ module Assistant
         Function::GetBalanceSheet,
         Function::GetIncomeStatement,
         Function::ImportBankStatement,
-        Function::SearchFamilyFiles,
-        Function::LinkTransfer
+        Function::SearchFamilyFiles
       ]
     end
 

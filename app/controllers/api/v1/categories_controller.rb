@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class Api::V1::CategoriesController < Api::V1::BaseController
+  include Pagy::Backend
+
   before_action :ensure_read_scope, only: [ :index, :show ]
   before_action :ensure_write_scope, only: [ :create, :update, :destroy ]
   before_action :set_category, only: [ :show, :update, :destroy ]
@@ -12,7 +14,17 @@ class Api::V1::CategoriesController < Api::V1::BaseController
     family = current_resource_owner.family
     categories_query = family.categories.includes(:parent, :subcategories).alphabetically
 
-    @categories = apply_filters(categories_query)
+    # Apply filters
+    categories_query = apply_filters(categories_query)
+
+    # Handle pagination with Pagy
+    @pagy, @categories = pagy(
+      categories_query,
+      page: safe_page_param,
+      limit: safe_per_page_param
+    )
+
+    @per_page = safe_per_page_param
 
     render :index
   rescue => e
@@ -170,6 +182,7 @@ class Api::V1::CategoriesController < Api::V1::BaseController
     render json: { icons: Category.icon_codes }
   end
 
+
   private
 
     def set_category
@@ -190,23 +203,33 @@ class Api::V1::CategoriesController < Api::V1::BaseController
       authorize_scope!(:write)
     end
 
-    def category_params
-      params.require(:category).permit(:name, :classification, :color, :icon, :parent_id)
-    end
-
     def apply_filters(query)
-      if params[:classification].present?
-        query = query.where(classification: params[:classification])
-      end
-
+      # Filter for root categories only (no parent)
       if params[:roots_only].present? && ActiveModel::Type::Boolean.new.cast(params[:roots_only])
         query = query.roots
       end
 
+      # Filter by parent_id
       if params[:parent_id].present?
         query = query.where(parent_id: params[:parent_id])
       end
 
       query
+    end
+
+    def safe_page_param
+      page = params[:page].to_i
+      page > 0 ? page : 1
+    end
+
+    def safe_per_page_param
+      per_page = params[:per_page].to_i
+
+      case per_page
+      when 1..100
+        per_page
+      else
+        25
+      end
     end
 end
