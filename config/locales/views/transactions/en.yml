@@ -212,6 +212,7 @@ en:
       form:
         toggle_selection_checkboxes: Toggle all checkboxes
     attachments:
+      file_not_found: "Attachment file could not be found. It may have been lost due to a storage issue."
       cannot_exceed: "Cannot exceed %{count} attachments per transaction"
       uploaded_one: "Attachment uploaded successfully"
       uploaded_many: "%{count} attachments uploaded successfully"

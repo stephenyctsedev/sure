@@ -11,8 +11,8 @@ Rails.application.config.to_prepare do
     private
 
       def authorize_transaction_attachment
-        attachment = ActiveStorage::Attachment.find_by(blob: authorized_blob)
-        return unless attachment&.record_type == "Transaction"
+        attachment = cached_transaction_attachment
+        return unless attachment
 
         transaction = attachment.record
 
@@ -25,8 +25,14 @@ Rails.application.config.to_prepare do
       def transaction_attachment?
         return false unless authorized_blob
 
-        attachment = ActiveStorage::Attachment.find_by(blob: authorized_blob)
-        attachment&.record_type == "Transaction"
+        cached_transaction_attachment.present?
+      end
+
+      def cached_transaction_attachment
+        @cached_transaction_attachment ||= begin
+          attachment = ActiveStorage::Attachment.find_by(blob: authorized_blob)
+          attachment if attachment&.record_type == "Transaction"
+        end
       end
 
       def authorized_blob
