@@ -84,30 +84,103 @@ self-hosted users can point it at their own instance.
 }
 ```
 
-### 3. Tool schema example — `create_account`
+### 3. Tool schemas — `create_account` and `update_account`
+
+#### ⚠️ Critical rules for account write tools
+
+1. **Always nest the body under the `account` key.**
+   The API uses Rails strong parameters (`params.require(:account)`). A flat body
+   will cause a `400 ParameterMissing` error.
+
+2. **Use `accountable_type`, never `account_type`.**
+   The permitted field name is `accountable_type`. Sending `account_type` is silently
+   ignored, making the value `nil` and triggering a `422 validation_failed` error.
+
+3. **`accountable_type` values are PascalCase.**
+   Valid values: `Depository`, `Investment`, `Crypto`, `Property`, `Vehicle`,
+   `OtherAsset`, `CreditCard`, `Loan`, `OtherLiability`.
+   Lowercase (e.g. `"loan"`) will fail validation.
+
+---
+
+#### `create_account`
 
 ```typescript
 server.tool(
   "create_account",
+  "Create a new manual account. The account type must be one of the supported " +
+  "PascalCase values. All fields are sent nested under an 'account' key.",
   {
-    name: z.string().describe("Account name"),
+    name: z.string().describe("Account name, e.g. 'My Savings'"),
     accountable_type: z
       .enum([
         "Depository", "Investment", "Crypto", "Property",
         "Vehicle", "OtherAsset", "CreditCard", "Loan", "OtherLiability",
       ])
-      .describe("Account type"),
+      .describe(
+        "Account type (PascalCase). " +
+        "Depository = checking/savings, CreditCard = credit card, " +
+        "Loan = mortgage/personal loan, Investment = brokerage/retirement, " +
+        "Crypto = crypto wallet, Property = real estate, Vehicle = car/boat, " +
+        "OtherAsset = any other asset, OtherLiability = any other liability."
+      ),
     balance: z.number().optional().describe("Opening balance (default: 0)"),
-    currency: z.string().optional().describe("ISO 4217 currency code"),
-    institution_name: z.string().optional(),
-    notes: z.string().optional(),
+    currency: z.string().optional().describe("ISO 4217 currency code, e.g. 'USD', 'CAD'"),
+    institution_name: z.string().optional().describe("Bank or institution name"),
+    notes: z.string().optional().describe("Free-text notes"),
+    opening_balance_date: z.string().optional().describe("ISO 8601 date for the opening balance entry, e.g. '2024-01-01'. Defaults to 2 years ago."),
   },
   async (params) => {
+    // ✅ Body MUST be wrapped in { account: ... }
     const account = await client.post("/api/v1/accounts", { account: params });
     return { content: [{ type: "text", text: JSON.stringify(account, null, 2) }] };
   }
 );
 ```
+
+**Correct example call:**
+```json
+{
+  "name": "Test 12345",
+  "accountable_type": "Loan",
+  "currency": "CAD",
+  "balance": 0
+}
+```
+→ sent to API as `{ "account": { "name": "Test 12345", "accountable_type": "Loan", "currency": "CAD", "balance": 0 } }`
+
+---
+
+#### `update_account`
+
+```typescript
+server.tool(
+  "update_account",
+  "Update an existing account's name, balance, institution name, or notes. " +
+  "Only include fields you want to change — omitted fields are left as-is. " +
+  "All fields are sent nested under an 'account' key.",
+  {
+    id: z.string().describe("Account UUID"),
+    name: z.string().optional().describe("New account name"),
+    balance: z.number().optional().describe("New current balance (creates a balance adjustment entry)"),
+    institution_name: z.string().optional().describe("Bank or institution name"),
+    notes: z.string().optional().describe("Free-text notes"),
+  },
+  async ({ id, ...fields }) => {
+    // ✅ Body MUST be wrapped in { account: ... }
+    const account = await client.patch(`/api/v1/accounts/${id}`, { account: fields });
+    return { content: [{ type: "text", text: JSON.stringify(account, null, 2) }] };
+  }
+);
+```
+
+**Notes on `update_account`:**
+- `accountable_type` cannot be changed after creation — omit it.
+- Changing `balance` does not directly overwrite the stored value; it creates a
+  balance-adjustment entry to reconcile the difference. Only send `balance` if you
+  intend to change it.
+- The server checks `params[:account].key?(:field)` — so a field present with value
+  `null` will be applied, not skipped.
 
 ### 4. Error handling
 
