@@ -81,10 +81,12 @@ en:
     potential_duplicate_description: This pending transaction may be the same as the posted transaction below. If so, merge them to avoid double-counting.
     merge_duplicate: Yes, merge them
     keep_both: No, keep both
+    split_parent_row:
+      split_label: "Split"
     transaction:
       pending: Pending
       pending_tooltip: Pending transaction — may change when posted
-      linked_with_plaid: Linked with Plaid
+      linked_with_provider: Linked with %{provider}
       activity_type_tooltip: Investment activity type
       possible_duplicate: Duplicate?
       potential_duplicate_tooltip: This may be a duplicate of another transaction
@@ -106,6 +108,12 @@ en:
       review_recommended_short: Rev
       confirm_title: "Merge with posted transaction (%{posted_amount})"
       reject_title: Keep as separate transactions
+    summary:
+      total_transactions: Total transactions
+      income: Income
+      expenses: Expenses
+      inflow: Inflow
+      outflow: Outflow
     header:
       edit_categories: Edit categories
       edit_imports: Edit imports
