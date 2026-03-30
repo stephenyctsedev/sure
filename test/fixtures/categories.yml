@@ -1,6 +1,6 @@
 one:
   name: Test
-  family: empty
+  family: inactive_trial
 
 income:
   name: Income
