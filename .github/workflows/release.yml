@@ -38,8 +38,8 @@ jobs:
 
       - name: Update mobile/pubspec.yaml
         run: |
-          SHA=$(git rev-parse --short HEAD)
-          sed -i "s/^version: .*/version: ${{ github.event.inputs.version }}+${SHA}/" mobile/pubspec.yaml
+          BUILD_NUMBER=$(date +%s)
+          sed -i "s/^version: .*/version: ${{ github.event.inputs.version }}+${BUILD_NUMBER}/" mobile/pubspec.yaml
 
       - name: Commit version bump
         run: |
