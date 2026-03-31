@@ -169,13 +169,25 @@ jobs:
             --prerelease \
             ${{ runner.temp }}/release-assets/*
 
+      - name: Check if gh-pages branch exists
+        id: check_ghpages
+        run: |
+          if git ls-remote --exit-code --heads origin gh-pages > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "gh-pages branch does not exist, skipping README update."
+          fi
+
       - name: Checkout gh-pages branch
+        if: steps.check_ghpages.outputs.exists == 'true'
         uses: actions/checkout@v4
         with:
           ref: gh-pages
           path: gh-pages
 
       - name: Update README with latest mobile build links
+        if: steps.check_ghpages.outputs.exists == 'true'
         run: |
           set -euo pipefail
           VERSION="${{ needs.prepare.outputs.version }}"
@@ -247,6 +259,7 @@ jobs:
           cat "$README"
 
       - name: Push updated README to gh-pages
+        if: steps.check_ghpages.outputs.exists == 'true'
         run: |
           cd gh-pages
           git config user.name "${{ github.actor }}"
