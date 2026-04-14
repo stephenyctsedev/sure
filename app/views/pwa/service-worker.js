@@ -65,11 +65,8 @@ self.addEventListener('fetch', (event) => {
   // Navigation requests - network with offline fallback
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch((error) => {
-        if (error.name === 'TypeError' || !navigator.onLine) {
-          return caches.match('/offline.html');
-        }
-        throw error;
+      fetch(event.request).catch(() => {
+        return caches.match('/offline.html');
       })
     );
   }
