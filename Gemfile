@@ -37,7 +37,7 @@ gem "sidekiq-cron"
 gem "sidekiq-unique-jobs"
 
 # Monitoring
-gem "vernier"
+gem "vernier", platforms: %i[ruby]
 gem "rack-mini-profiler"
 gem "sentry-ruby"
 gem "sentry-rails"
@@ -48,6 +48,7 @@ gem "skylight", groups: [ :production ]
 
 # Active Storage
 gem "aws-sdk-s3", "~> 1.208.0", require: false
+gem "google-cloud-storage", "~> 1.59", require: false
 gem "image_processing", ">= 1.2"
 
 # Other
@@ -121,7 +122,7 @@ group :development do
   gem "web-console"
   gem "faker"
   gem "benchmark-ips"
-  gem "stackprof"
+  gem "stackprof", platforms: %i[ruby]
   gem "derailed_benchmarks"
   gem "foreman"
 end
