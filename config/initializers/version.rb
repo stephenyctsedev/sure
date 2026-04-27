@@ -16,7 +16,7 @@ module Sure
 
     private
       def semver
-        "0.7.1"
+        "0.7.2"
       end
   end
 end
