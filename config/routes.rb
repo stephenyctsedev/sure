@@ -424,6 +424,7 @@ Rails.application.routes.draw do
         get :icons, on: :collection
       end
       resources :merchants, only: %i[index show]
+      resources :rules, only: [ :index, :show ]
       resources :tags, only: %i[index show create update destroy]
 
       resources :transactions, only: [ :index, :show, :create, :update, :destroy ] do
@@ -431,7 +432,8 @@ Rails.application.routes.draw do
       end
       resources :trades, only: [ :index, :show, :create, :update, :destroy ]
       resources :holdings, only: [ :index, :show ]
-      resources :valuations, only: [ :create, :update, :show ]
+      resources :valuations, only: [ :index, :create, :update, :show ]
+      resources :recurring_transactions, only: [ :index, :show, :create, :update, :destroy ]
       resources :imports, only: [ :index, :show, :create ]
       resource :usage, only: [ :show ], controller: :usage
       resource :balance_sheet, only: [ :show ], controller: :balance_sheet
@@ -443,6 +445,7 @@ Rails.application.routes.draw do
         end
       end
 
+      get "users/reset/status", to: "users#reset_status"
       delete "users/reset", to: "users#reset"
       delete "users/me", to: "users#destroy"
 

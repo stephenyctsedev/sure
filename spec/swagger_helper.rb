@@ -64,6 +64,27 @@ RSpec.configure do |config|
               }
             }
           },
+          ErrorResponseWithImportId: {
+            type: :object,
+            required: %w[error import_id],
+            properties: {
+              error: { type: :string },
+              message: { type: :string, nullable: true },
+              import_id: {
+                type: :string,
+                format: :uuid,
+                description: 'Import ID preserved for retry or inspection after upload succeeds but publish fails'
+              }
+            }
+          },
+          MfaRequiredResponse: {
+            type: :object,
+            required: %w[error mfa_required],
+            properties: {
+              error: { type: :string },
+              mfa_required: { type: :boolean }
+            }
+          },
           ToolCall: {
             type: :object,
             required: %w[id function_name function_arguments created_at],
@@ -175,22 +196,28 @@ RSpec.configure do |config|
             properties: {
               id: { type: :string, format: :uuid },
               name: { type: :string },
-              account_type: { type: :string }
+              account_type: { type: :string, nullable: true },
+              status: { type: :string }
             }
           },
           AccountDetail: {
             type: :object,
-            required: %w[id name balance currency classification account_type status created_at updated_at],
+            required: %w[id name balance balance_cents cash_balance cash_balance_cents currency classification account_type status created_at updated_at],
             properties: {
               id: { type: :string, format: :uuid },
               name: { type: :string },
               balance: { type: :string },
+              balance_cents: { type: :integer, description: 'Signed balance in minor currency units' },
+              cash_balance: { type: :string },
+              cash_balance_cents: { type: :integer, description: 'Signed cash balance in minor currency units' },
               currency: { type: :string },
               classification: { type: :string, enum: %w[asset liability], nullable: true },
-              account_type: { type: :string },
+              account_type: { type: :string, nullable: true },
+              subtype: { type: :string, nullable: true },
+              status: { type: :string, enum: %w[active draft disabled pending_deletion] },
               institution_name: { type: :string, nullable: true },
+              institution_domain: { type: :string, nullable: true },
               notes: { type: :string, nullable: true },
-              status: { type: :string },
               created_at: { type: :string, format: :'date-time' },
               updated_at: { type: :string, format: :'date-time' }
             }
@@ -318,6 +345,83 @@ RSpec.configure do |config|
             type: :array,
             items: { '$ref' => '#/components/schemas/TagDetail' }
           },
+          RuleAction: {
+            type: :object,
+            required: %w[id action_type created_at updated_at],
+            properties: {
+              id: { type: :string, format: :uuid },
+              action_type: { type: :string },
+              value: { type: :string, nullable: true },
+              created_at: { type: :string, format: :'date-time' },
+              updated_at: { type: :string, format: :'date-time' }
+            }
+          },
+          RuleCondition: {
+            type: :object,
+            required: %w[id condition_type operator sub_conditions created_at updated_at],
+            properties: {
+              id: { type: :string, format: :uuid },
+              condition_type: { type: :string },
+              operator: { type: :string },
+              value: { type: :string, nullable: true },
+              sub_conditions: {
+                type: :array,
+                items: { '$ref' => '#/components/schemas/RuleCondition' }
+              },
+              created_at: { type: :string, format: :'date-time' },
+              updated_at: { type: :string, format: :'date-time' }
+            }
+          },
+          Rule: {
+            type: :object,
+            required: %w[id resource_type active conditions actions created_at updated_at],
+            properties: {
+              id: { type: :string, format: :uuid },
+              name: { type: :string, nullable: true },
+              resource_type: { type: :string, enum: %w[transaction] },
+              active: { type: :boolean },
+              effective_date: { type: :string, format: :date, nullable: true },
+              conditions: {
+                type: :array,
+                items: { '$ref' => '#/components/schemas/RuleCondition' }
+              },
+              actions: {
+                type: :array,
+                items: { '$ref' => '#/components/schemas/RuleAction' }
+              },
+              created_at: { type: :string, format: :'date-time' },
+              updated_at: { type: :string, format: :'date-time' }
+            }
+          },
+          RuleResponse: {
+            type: :object,
+            required: %w[data],
+            properties: {
+              data: { '$ref' => '#/components/schemas/Rule' }
+            }
+          },
+          RuleCollection: {
+            type: :object,
+            required: %w[data meta],
+            properties: {
+              data: {
+                type: :array,
+                items: { '$ref' => '#/components/schemas/Rule' }
+              },
+              meta: {
+                type: :object,
+                required: %w[current_page total_pages total_count per_page],
+                properties: {
+                  current_page: { type: :integer },
+                  next_page: { type: :integer, nullable: true },
+                  prev_page: { type: :integer, nullable: true },
+                  total_pages: { type: :integer },
+                  total_count: { type: :integer },
+                  per_page: { type: :integer }
+                }
+              }
+            }
+          },
           Transfer: {
             type: :object,
             required: %w[id amount currency],
@@ -326,6 +430,44 @@ RSpec.configure do |config|
               amount: { type: :string },
               currency: { type: :string },
               other_account: { '$ref' => '#/components/schemas/Account', nullable: true }
+            }
+          },
+          RecurringTransaction: {
+            type: :object,
+            required: %w[id amount amount_cents currency expected_day_of_month last_occurrence_date next_expected_date status occurrence_count manual created_at updated_at],
+            properties: {
+              id: { type: :string, format: :uuid },
+              amount: { type: :string },
+              amount_cents: { type: :integer, description: 'Amount in currency minor units' },
+              currency: { type: :string },
+              expected_day_of_month: { type: :integer, minimum: 1, maximum: 31 },
+              last_occurrence_date: { type: :string, format: :date },
+              next_expected_date: { type: :string, format: :date },
+              status: { type: :string, enum: %w[active inactive] },
+              occurrence_count: { type: :integer, minimum: 0 },
+              name: { type: :string, nullable: true },
+              manual: { type: :boolean },
+              expected_amount_min: { type: :string, nullable: true },
+              expected_amount_min_cents: { type: :integer, nullable: true, description: 'Minimum expected amount in currency minor units' },
+              expected_amount_max: { type: :string, nullable: true },
+              expected_amount_max_cents: { type: :integer, nullable: true, description: 'Maximum expected amount in currency minor units' },
+              expected_amount_avg: { type: :string, nullable: true },
+              expected_amount_avg_cents: { type: :integer, nullable: true, description: 'Average expected amount in currency minor units' },
+              account: { '$ref' => '#/components/schemas/Account', nullable: true },
+              merchant: { '$ref' => '#/components/schemas/Merchant', nullable: true },
+              created_at: { type: :string, format: :'date-time' },
+              updated_at: { type: :string, format: :'date-time' }
+            }
+          },
+          RecurringTransactionCollection: {
+            type: :object,
+            required: %w[recurring_transactions pagination],
+            properties: {
+              recurring_transactions: {
+                type: :array,
+                items: { '$ref' => '#/components/schemas/RecurringTransaction' }
+              },
+              pagination: { '$ref' => '#/components/schemas/Pagination' }
             }
           },
           Transaction: {
@@ -377,6 +519,17 @@ RSpec.configure do |config|
               updated_at: { type: :string, format: :'date-time' }
             }
           },
+          ValuationCollection: {
+            type: :object,
+            required: %w[valuations pagination],
+            properties: {
+              valuations: {
+                type: :array,
+                items: { '$ref' => '#/components/schemas/Valuation' }
+              },
+              pagination: { '$ref' => '#/components/schemas/Pagination' }
+            }
+          },
           DeleteResponse: {
             type: :object,
             required: %w[message],
@@ -401,36 +554,65 @@ RSpec.configure do |config|
           },
           ImportStats: {
             type: :object,
+            required: %w[rows_count valid_rows_count invalid_rows_count mappings_count unassigned_mappings_count],
             properties: {
               rows_count: { type: :integer, minimum: 0 },
-              valid_rows_count: { type: :integer, minimum: 0, nullable: true }
+              valid_rows_count: { type: :integer, minimum: 0 },
+              invalid_rows_count: { type: :integer, minimum: 0 },
+              mappings_count: { type: :integer, minimum: 0 },
+              unassigned_mappings_count: { type: :integer, minimum: 0 }
             }
+          },
+          ImportStatusSummary: {
+            type: :object,
+            required: %w[uploaded configured terminal],
+            properties: {
+              uploaded: { type: :boolean },
+              configured: { type: :boolean },
+              terminal: { type: :boolean }
+            }
+          },
+          ImportStatusDetail: {
+            allOf: [
+              { '$ref' => '#/components/schemas/ImportStatusSummary' },
+              {
+                type: :object,
+                required: %w[cleaned publishable revertable],
+                properties: {
+                  cleaned: { type: :boolean },
+                  publishable: { type: :boolean },
+                  revertable: { type: :boolean }
+                }
+              }
+            ]
           },
           ImportSummary: {
             type: :object,
-            required: %w[id type status created_at updated_at],
+            required: %w[id type status created_at updated_at status_detail],
             properties: {
               id: { type: :string, format: :uuid },
-              type: { type: :string, enum: %w[TransactionImport TradeImport AccountImport MintImport CategoryImport RuleImport] },
+              type: { type: :string, enum: %w[TransactionImport TradeImport AccountImport MintImport CategoryImport RuleImport SureImport] },
               status: { type: :string, enum: %w[pending complete importing reverting revert_failed failed] },
               created_at: { type: :string, format: :'date-time' },
               updated_at: { type: :string, format: :'date-time' },
               account_id: { type: :string, format: :uuid, nullable: true },
               rows_count: { type: :integer, minimum: 0 },
-              error: { type: :string, nullable: true }
+              error: { type: :string, nullable: true },
+              status_detail: { '$ref' => '#/components/schemas/ImportStatusSummary' }
             }
           },
           ImportDetail: {
             type: :object,
-            required: %w[id type status created_at updated_at],
+            required: %w[id type status created_at updated_at status_detail configuration stats],
             properties: {
               id: { type: :string, format: :uuid },
-              type: { type: :string, enum: %w[TransactionImport TradeImport AccountImport MintImport CategoryImport RuleImport] },
+              type: { type: :string, enum: %w[TransactionImport TradeImport AccountImport MintImport CategoryImport RuleImport SureImport] },
               status: { type: :string, enum: %w[pending complete importing reverting revert_failed failed] },
               created_at: { type: :string, format: :'date-time' },
               updated_at: { type: :string, format: :'date-time' },
               account_id: { type: :string, format: :uuid, nullable: true },
               error: { type: :string, nullable: true },
+              status_detail: { '$ref' => '#/components/schemas/ImportStatusDetail' },
               configuration: { '$ref' => '#/components/schemas/ImportConfiguration' },
               stats: { '$ref' => '#/components/schemas/ImportStats' }
             }
@@ -571,6 +753,49 @@ RSpec.configure do |config|
             required: %w[message],
             properties: {
               message: { type: :string }
+            }
+          },
+          ResetInitiatedResponse: {
+            type: :object,
+            required: %w[message status job_id family_id status_url],
+            properties: {
+              message: { type: :string },
+              status: { type: :string, enum: %w[queued] },
+              job_id: {
+                type: :string,
+                description: 'Informational Active Job identifier returned by the queue adapter; reset status is family-scoped, not job-scoped.'
+              },
+              family_id: { type: :string, format: :uuid, description: 'UUID of the family being reset.' },
+              status_url: { type: :string }
+            }
+          },
+          ResetStatusResponse: {
+            type: :object,
+            required: %w[status family_id reset_complete counts],
+            properties: {
+              status: {
+                type: :string,
+                enum: %w[complete data_remaining],
+                description: 'Counts-based family reset status at response time.'
+              },
+              family_id: { type: :string, format: :uuid, description: 'UUID of the family whose reset target counts were checked.' },
+              reset_complete: {
+                type: :boolean,
+                description: 'True when all reset target counts are zero at response time. This is a family data snapshot, not a durable per-job completion record.'
+              },
+              counts: {
+                type: :object,
+                required: %w[accounts categories tags merchants plaid_items imports budgets],
+                properties: {
+                  accounts: { type: :integer, minimum: 0 },
+                  categories: { type: :integer, minimum: 0 },
+                  tags: { type: :integer, minimum: 0 },
+                  merchants: { type: :integer, minimum: 0 },
+                  plaid_items: { type: :integer, minimum: 0 },
+                  imports: { type: :integer, minimum: 0 },
+                  budgets: { type: :integer, minimum: 0 }
+                }
+              }
             }
           }
         }

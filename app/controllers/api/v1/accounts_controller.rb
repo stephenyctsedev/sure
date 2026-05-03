@@ -8,16 +8,13 @@ class Api::V1::AccountsController < Api::V1::BaseController
   before_action :set_account, only: [ :show, :update ]
 
   def index
-    family = current_resource_owner.family
-    accounts_query = family.accounts.accessible_by(current_resource_owner).visible.alphabetically
+    @per_page = safe_per_page_param
 
     @pagy, @accounts = pagy(
-      accounts_query,
+      accounts_scope.alphabetically,
       page: safe_page_param,
-      limit: safe_per_page_param
+      limit: @per_page
     )
-
-    @per_page = safe_per_page_param
 
     render :index
   rescue => e
@@ -31,14 +28,29 @@ class Api::V1::AccountsController < Api::V1::BaseController
   end
 
   def show
+    unless valid_uuid?(params[:id])
+      render json: {
+        error: "not_found",
+        message: "Account not found"
+      }, status: :not_found
+      return
+    end
+
+    @account = accounts_scope.find(params[:id])
+
     render :show
+  rescue ActiveRecord::RecordNotFound
+    render json: {
+      error: "not_found",
+      message: "Account not found"
+    }, status: :not_found
   rescue => e
     Rails.logger.error "AccountsController#show error: #{e.message}"
     Rails.logger.error e.backtrace.join("\n")
 
     render json: {
       error: "internal_server_error",
-      message: "Error: #{e.message}"
+      message: "An unexpected error occurred"
     }, status: :internal_server_error
   end
 
@@ -85,7 +97,7 @@ class Api::V1::AccountsController < Api::V1::BaseController
 
     render json: {
       error: "internal_server_error",
-      message: "Error: #{e.message}"
+      message: "An unexpected error occurred"
     }, status: :internal_server_error
   end
 
@@ -95,7 +107,6 @@ class Api::V1::AccountsController < Api::V1::BaseController
     attrs[:institution_name] = account_params[:institution_name] if params[:account]&.key?(:institution_name)
     attrs[:notes]            = account_params[:notes]            if params[:account]&.key?(:notes)
 
-    # Handle balance update separately (uses set_current_balance)
     if params[:account]&.key?(:balance)
       new_balance = account_params[:balance].to_d
       if new_balance != @account.balance
@@ -128,15 +139,14 @@ class Api::V1::AccountsController < Api::V1::BaseController
 
     render json: {
       error: "internal_server_error",
-      message: "Error: #{e.message}"
+      message: "An unexpected error occurred"
     }, status: :internal_server_error
   end
 
   private
 
     def set_account
-      family = current_resource_owner.family
-      @account = family.accounts.find(params[:id])
+      @account = accounts_scope.find(params[:id])
     rescue ActiveRecord::RecordNotFound
       render json: {
         error: "not_found",
@@ -150,6 +160,21 @@ class Api::V1::AccountsController < Api::V1::BaseController
 
     def ensure_write_scope
       authorize_scope!(:write)
+    end
+
+    def accounts_scope
+      scope = current_resource_owner.family.accounts
+                                    .accessible_by(current_resource_owner)
+                                    .includes(:accountable, account_providers: :provider)
+      include_disabled_accounts? ? scope : scope.visible
+    end
+
+    def include_disabled_accounts?
+      ActiveModel::Type::Boolean.new.cast(params[:include_disabled])
+    end
+
+    def valid_uuid?(value)
+      value.to_s.match?(/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i)
     end
 
     def account_params
