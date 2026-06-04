@@ -72,13 +72,11 @@ class Api::V1::CategoriesController < Api::V1::BaseController
       end
     end
 
-    attrs = {
-      name: category_params[:name],
-      classification: category_params[:classification]
-    }
-    attrs[:color]       = category_params[:color] if category_params[:color].present?
-    attrs[:lucide_icon] = category_params[:icon]  if category_params[:icon].present?
-    attrs[:parent_id]   = category_params[:parent_id] if category_params[:parent_id].present?
+    attrs = { name: category_params[:name] }
+    attrs[:classification] = category_params[:classification] if params[:category]&.key?(:classification)
+    attrs[:color]          = category_params[:color]          if category_params[:color].present?
+    attrs[:lucide_icon]    = category_params[:icon]           if category_params[:icon].present?
+    attrs[:parent_id]      = category_params[:parent_id]      if category_params[:parent_id].present?
 
     @category = family.categories.new(attrs)
     @category.lucide_icon = Category.suggested_icon(@category.name) if @category.lucide_icon.blank?
