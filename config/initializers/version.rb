@@ -16,10 +16,10 @@ module Sure
 
     private
       def semver
-        stripped_content = Rails.root.join("0.7.3").read.strip
-        stripped_content.presence || "0.7.3"
+        stripped_content = Rails.root.join("0.7.4").read.strip
+        stripped_content.presence || "0.7.4"
       rescue Errno::ENOENT
-        "0.7.3"
+        "0.7.4"
       end
   end
 end
