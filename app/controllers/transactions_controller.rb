@@ -2,6 +2,7 @@ class TransactionsController < ApplicationController
   include EntryableResource
 
   before_action :set_entry_for_unlock, only: :unlock
+  before_action :set_entry_for_tags, only: :update_tags
   before_action :store_params!, only: :index
 
   def new
@@ -27,6 +28,7 @@ class TransactionsController < ApplicationController
                        )
 
     @pagy, @transactions = pagy(base_scope, limit: safe_per_page)
+    Transaction::ActivitySecurityPreloader.new(@transactions).preload
 
     # Preload split parent data
     entry_ids = @transactions.map { |t| t.entry.id }
@@ -62,6 +64,8 @@ class TransactionsController < ApplicationController
                                          10.days.from_now.to_date,
                                          Date.current)
                                   .includes(:merchant)
+
+    @breadcrumbs = [ [ t("breadcrumbs.home"), root_path ], [ t("breadcrumbs.transactions"), nil ] ]
   end
 
   def clear_filter
@@ -106,7 +110,7 @@ class TransactionsController < ApplicationController
       @entry.mark_user_modified!
       @entry.transaction.lock_attr!(:tag_ids) if @entry.transaction.tags.any?
 
-      flash[:notice] = "Transaction created"
+      flash[:notice] = t(".created")
 
       respond_to do |format|
         format.html { redirect_back_or_to account_path(@entry.account) }
@@ -140,8 +144,9 @@ class TransactionsController < ApplicationController
       @entry.reload
 
       respond_to do |format|
-        format.html { redirect_back_or_to account_path(@entry.account), notice: "Transaction updated" }
+        format.html { redirect_back_or_to account_path(@entry.account), notice: t(".updated") }
         format.turbo_stream do
+          in_split_group = helpers.in_split_group?(@entry, params[:grouped])
           render turbo_stream: [
             turbo_stream.replace(
               dom_id(@entry, :header),
@@ -158,7 +163,11 @@ class TransactionsController < ApplicationController
               partial: "transactions/notes",
               locals: { entry: @entry, can_annotate: can_annotate_entry? }
             ) if params[:entry]&.key?(:notes) && notes_changed),
-            turbo_stream.replace(@entry),
+            turbo_stream.replace(
+              dom_id(@entry),
+              partial: "entries/entry",
+              locals: { entry: @entry, in_split_group: in_split_group }
+            ),
             *flash_notification_stream_items
           ].compact
         end
@@ -166,6 +175,20 @@ class TransactionsController < ApplicationController
     else
       render :show, status: :unprocessable_entity
     end
+  end
+
+  def update_tags
+    return unless require_account_permission!(@entry.account, :annotate, redirect_path: transaction_path(@entry))
+
+    tag_ids = Current.family.tags.where(id: tag_ids_param).pluck(:id)
+
+    @entry.transaction.tag_ids = tag_ids
+    @entry.lock_saved_attributes!
+    @entry.mark_user_modified!
+    @entry.transaction.lock_attr!(:tag_ids)
+    @entry.sync_account_later
+
+    render json: { tag_ids: @entry.transaction.tag_ids }
   end
 
   def merge_duplicate
@@ -180,7 +203,9 @@ class TransactionsController < ApplicationController
     end
 
     redirect_to transactions_path
-  rescue ActiveRecord::RecordNotDestroyed, ActiveRecord::RecordInvalid => e
+  rescue ActiveRecord::RecordNotFound, ActiveRecord::RecordInvalid,
+         ActiveRecord::RecordNotDestroyed, ActiveRecord::Deadlocked,
+         ActiveRecord::LockWaitTimeout => e
     Rails.logger.error("Failed to merge duplicate transaction #{params[:id]}: #{e.message}")
     flash[:alert] = t("transactions.merge_duplicate.failure")
     redirect_to transactions_path
@@ -446,6 +471,7 @@ class TransactionsController < ApplicationController
       nature = entry_params.delete(:nature)
 
       entry_params.delete(:amount) if entry_params[:amount].blank?
+      entry_params.delete(:date) if entry_params[:date].blank?
 
       if nature.present? && entry_params[:amount].present?
         signed_amount = nature == "inflow" ? -entry_params[:amount].to_d : entry_params[:amount].to_d
@@ -453,6 +479,14 @@ class TransactionsController < ApplicationController
       end
 
       entry_params
+    end
+
+    def tag_ids_param
+      Array(params[:tag_ids]).reject(&:blank?)
+    end
+
+    def set_entry_for_tags
+      set_entry
     end
 
     # Filters entry_params based on the user's permission on the account.

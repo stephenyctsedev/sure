@@ -3,6 +3,7 @@ class RecurringTransaction < ApplicationRecord
 
   belongs_to :family
   belongs_to :account, optional: true
+  belongs_to :destination_account, optional: true, class_name: "Account"
   belongs_to :merchant, optional: true
 
   monetize :amount
@@ -19,10 +20,11 @@ class RecurringTransaction < ApplicationRecord
   validates :occurrence_count, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validate :merchant_or_name_present
   validate :amount_variance_consistency
+  validate :transfer_endpoints_consistent
 
   def merchant_or_name_present
     if merchant_id.blank? && name.blank?
-      errors.add(:base, "Either merchant or name must be present")
+      errors.add(:base, :merchant_or_name_required)
     end
   end
 
@@ -36,10 +38,50 @@ class RecurringTransaction < ApplicationRecord
     end
   end
 
+  # When this row represents a recurring transfer, both endpoints must be
+  # present, belong to the same family, and not be the same account.
+  def transfer_endpoints_consistent
+    return if destination_account_id.blank?
+
+    if account_id.blank?
+      errors.add(:account, "must be present on a recurring transfer")
+    elsif account.blank?
+      # account_id references a row that was destroyed. Mirror the
+      # destination_account.blank? branch so the source side surfaces a
+      # normal validation error too.
+      errors.add(:account, "must exist")
+    elsif destination_account.blank?
+      # destination_account_id references a row that was destroyed (or never
+      # existed). Surface as a normal validation error instead of letting
+      # the FK fire on save.
+      errors.add(:destination_account, "must exist")
+    elsif account_id == destination_account_id
+      errors.add(:destination_account, "cannot be the same as the source account")
+    elsif account.family_id != destination_account.family_id
+      errors.add(:destination_account, "must belong to the same family as the source account")
+    end
+  end
+
+  def transfer?
+    destination_account_id.present?
+  end
+
   scope :for_family, ->(family) { where(family: family) }
   scope :expected_soon, -> { active.where("next_expected_date <= ?", 1.month.from_now) }
   scope :accessible_by, ->(user) {
-    where(account_id: Account.accessible_by(user).select(:id)).or(where(account_id: nil))
+    accessible_account_ids = Account.accessible_by(user).select(:id)
+    # A recurring row is accessible when:
+    #   * its account_id is in the user's accessible set or null (legacy rows
+    #     with no account scoping survive), AND
+    #   * its destination_account_id is also accessible OR null (so a recurring
+    #     transfer never leaks into the list of a user without access to BOTH
+    #     endpoints).
+    where(account_id: accessible_account_ids)
+      .or(where(account_id: nil))
+      .merge(
+        where(destination_account_id: accessible_account_ids)
+          .or(where(destination_account_id: nil))
+      )
   }
 
   # Class methods for identification and cleanup
@@ -56,6 +98,44 @@ class RecurringTransaction < ApplicationRecord
 
   def self.cleanup_stale_for(family)
     Cleaner.new(family).cleanup_stale_transactions
+  end
+
+  # Create a manual recurring transfer from an existing Transfer pair.
+  # Mirrors `create_from_transaction` but populates source + destination
+  # accounts and skips merchant / variance lookup -- transfers are
+  # account-pair-shaped, not merchant-shaped.
+  def self.create_from_transfer(transfer)
+    outflow_entry = transfer.outflow_transaction&.entry
+    inflow_entry  = transfer.inflow_transaction&.entry
+
+    raise ArgumentError, "transfer is missing one of its entries" unless outflow_entry && inflow_entry
+
+    source_account      = outflow_entry.account
+    destination_account = inflow_entry.account
+    family              = source_account.family
+
+    expected_day = outflow_entry.date.day
+    next_expected = calculate_next_expected_date_from_today(expected_day)
+
+    create!(
+      family: family,
+      account: source_account,
+      destination_account: destination_account,
+      merchant_id: nil,
+      # Transfer#name yields "Payment to ..." for liability destinations
+      # and "Transfer to ..." otherwise, matching Transfer::Creator's
+      # name_prefix logic so the recurring row reads consistently with
+      # the originating Transfer.
+      name: transfer.name,
+      amount: outflow_entry.amount, # positive (outflow), per Sure sign convention
+      currency: outflow_entry.currency,
+      expected_day_of_month: expected_day,
+      last_occurrence_date: outflow_entry.date,
+      next_expected_date: next_expected,
+      status: "active",
+      occurrence_count: 1,
+      manual: true
+    )
   end
 
   # Create a manual recurring transaction from an existing transaction
@@ -180,29 +260,15 @@ class RecurringTransaction < ApplicationRecord
 
   # Find matching transactions for this recurring pattern
   def matching_transactions
-    # For manual recurring with amount variance, match within range
-    # For automatic recurring, match exact amount
-    base = account.present? ? account.entries : family.entries
+    # Recurring transfers can't be matched by single-account name/amount —
+    # future occurrences carry arbitrary names — so match the Transfer pair.
+    return transfer_matching_transactions if transfer?
 
-    entries = if manual? && has_amount_variance?
-      base
-        .where(entryable_type: "Transaction")
-        .where(currency: currency)
-        .where("entries.amount BETWEEN ? AND ?", expected_amount_min, expected_amount_max)
-        .where("EXTRACT(DAY FROM entries.date) BETWEEN ? AND ?",
-               [ expected_day_of_month - 2, 1 ].max,
-               [ expected_day_of_month + 2, 31 ].min)
-        .order(date: :desc)
-    else
-      base
-        .where(entryable_type: "Transaction")
-        .where(currency: currency)
-        .where("entries.amount = ?", amount)
-        .where("EXTRACT(DAY FROM entries.date) BETWEEN ? AND ?",
-               [ expected_day_of_month - 2, 1 ].max,
-               [ expected_day_of_month + 2, 31 ].min)
-        .order(date: :desc)
-    end
+    # Amount/cadence-scoped Transaction entries on this account (or family).
+    base = account.present? ? account.entries : family.entries
+    entries = day_of_month_scope(
+      amount_window_scope(base.where(entryable_type: "Transaction").where(currency: currency))
+    ).order(date: :desc)
 
     # Filter by merchant or name
     if merchant_id.present?
@@ -313,11 +379,55 @@ class RecurringTransaction < ApplicationRecord
       amount_min: expected_amount_min,
       amount_max: expected_amount_max,
       amount_avg: expected_amount_avg,
-      has_variance: has_amount_variance?
+      has_variance: has_amount_variance?,
+      transfer: transfer?,
+      source_account: account,
+      destination_account: destination_account
     )
   end
 
   private
+    # Issue #1590: a recurring transfer's future occurrences rarely share the
+    # seed's name (user free-text, importer wording, the auto-matcher's
+    # "Transfer to ..."), so name-based matching returns [] and the Cleaner
+    # would wrongly inactivate a still-active transfer. Match the Transfer
+    # *pair* instead — an outflow on the source account paired with an inflow
+    # on the destination account, within the usual amount/cadence window — and
+    # return the outflow entries (the occurrence-date carrier, consistent with
+    # create_from_transfer).
+    def transfer_matching_transactions
+      return Entry.none unless account && destination_account
+
+      outflow_entries = day_of_month_scope(
+        amount_window_scope(account.entries.where(entryable_type: "Transaction").where(currency: currency))
+      ).order(date: :desc)
+
+      paired_outflow_transaction_ids = Transfer
+        .where(outflow_transaction_id: outflow_entries.select(:entryable_id))
+        .where(inflow_transaction_id:
+          destination_account.entries.where(entryable_type: "Transaction").select(:entryable_id))
+        .pluck(:outflow_transaction_id)
+
+      outflow_entries.where(entryable_id: paired_outflow_transaction_ids)
+    end
+
+    # Transaction entries whose amount fits the pattern: exact, or within the
+    # configured variance band for manual recurring rows.
+    def amount_window_scope(relation)
+      if manual? && has_amount_variance?
+        relation.where("entries.amount BETWEEN ? AND ?", expected_amount_min, expected_amount_max)
+      else
+        relation.where("entries.amount = ?", amount)
+      end
+    end
+
+    # Entries whose day-of-month lands within ±2 days of the expected day.
+    def day_of_month_scope(relation)
+      relation.where("EXTRACT(DAY FROM entries.date) BETWEEN ? AND ?",
+                     [ expected_day_of_month - 2, 1 ].max,
+                     [ expected_day_of_month + 2, 31 ].min)
+    end
+
     def monetizable_currency
       currency
     end

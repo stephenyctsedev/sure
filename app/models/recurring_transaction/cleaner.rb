@@ -7,11 +7,18 @@ class RecurringTransaction
     end
 
     # Mark recurring transactions as inactive if they haven't occurred recently
-    # Uses 2 months for automatic recurring, 6 months for manual recurring
+    # Uses 2 months for automatic recurring, 6 months for manual recurring.
+    #
+    # Transfer rows (destination_account_id present) are included: as of issue
+    # #1590, `matching_transactions` detects the Transfer pair, so a still-active
+    # transfer keeps surfacing recent matches and stays active, while one whose
+    # pair has genuinely stopped is correctly retired.
     def cleanup_stale_transactions
       stale_count = 0
 
-      family.recurring_transactions.active.find_each do |recurring_transaction|
+      family.recurring_transactions
+            .active
+            .find_each do |recurring_transaction|
         next unless recurring_transaction.should_be_inactive?
 
         # Determine threshold based on manual flag

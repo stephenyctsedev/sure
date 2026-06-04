@@ -12,11 +12,14 @@ class Family::Syncer
     plaid_items
     simplefin_items
     lunchflow_items
+    akahu_items
     enable_banking_items
     indexa_capital_items
     coinbase_items
     coinstats_items
     mercury_items
+    brex_items
+    binance_items
     snaptrade_items
     sophtron_items
   ].freeze

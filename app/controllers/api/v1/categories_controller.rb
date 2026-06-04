@@ -81,6 +81,7 @@ class Api::V1::CategoriesController < Api::V1::BaseController
     attrs[:parent_id]   = category_params[:parent_id] if category_params[:parent_id].present?
 
     @category = family.categories.new(attrs)
+    @category.lucide_icon = Category.suggested_icon(@category.name) if @category.lucide_icon.blank?
 
     if @category.save
       render :show, status: :created
@@ -181,7 +182,6 @@ class Api::V1::CategoriesController < Api::V1::BaseController
   def icons
     render json: { icons: Category.icon_codes }
   end
-
 
   private
 

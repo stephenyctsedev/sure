@@ -14,10 +14,28 @@ module ApplicationHelper
     form_with(**options, &block)
   end
 
+  # Locale-aware ordinal label for integers.
+  # English falls through to Ruby's ordinalize ("1st"); Catalan returns "1r"/"2n"/...
+  def localized_ordinal(number)
+    case I18n.locale
+    when :ca
+      n = number.to_i
+      suffix = case n
+      when 1, 3 then "r"
+      when 2 then "n"
+      when 4 then "t"
+      else "è"
+      end
+      "#{n}#{suffix}"
+    else
+      number.to_i.ordinalize
+    end
+  end
+
   def icon(key, size: "md", color: "default", custom: false, as_button: false, **opts)
     extra_classes = opts.delete(:class)
     sizes = { xs: "w-3 h-3", sm: "w-4 h-4", md: "w-5 h-5", lg: "w-6 h-6", xl: "w-7 h-7", "2xl": "w-8 h-8" }
-    colors = { default: "fg-gray", white: "fg-inverse", success: "text-success", warning: "text-warning", destructive: "text-destructive", current: "text-current" }
+    colors = { default: "text-secondary", white: "text-inverse", success: "text-success", warning: "text-warning", destructive: "text-destructive", info: "text-info", current: "text-current" }
 
     icon_classes = class_names(
       "shrink-0",
@@ -26,12 +44,14 @@ module ApplicationHelper
       extra_classes
     )
 
+    resolved_key = normalize_icon_key(key)
+
     if custom
-      inline_svg_tag("#{key}.svg", class: icon_classes, **opts)
+      inline_svg_tag("#{resolved_key}.svg", class: icon_classes, **opts)
     elsif as_button
-      render DS::Button.new(variant: "icon", class: extra_classes, icon: key, size: size, type: "button", **opts)
+      render DS::Button.new(variant: "icon", class: extra_classes, icon: resolved_key, size: size, type: "button", **opts)
     else
-      lucide_icon(key, class: icon_classes, **opts)
+      safe_lucide_icon(resolved_key, class: icon_classes, **opts)
     end
   end
 
@@ -57,6 +77,16 @@ module ApplicationHelper
     current_page?(path) || (request.path.start_with?(path) && path != "/")
   end
 
+  # Wraps a nav-item hash so a single call performs both halves of a
+  # preview-gated entry: returns `nil` for users without the flag (so the
+  # entry never reaches the rendered nav), and stamps `preview: true` on
+  # the hash for users with the flag (so the partial paints the violet
+  # dot on the icon). Use inside an `Array#compact` nav-items list.
+  def preview_gated_nav_item(item)
+    return nil unless preview_features_enabled?
+    item.merge(preview: true)
+  end
+
   # Wrapper around I18n.l to support custom date formats
   def format_date(object, format = :default, options = {})
     date = object.to_date
@@ -72,7 +102,7 @@ module ApplicationHelper
 
 
   def family_moniker
-    Current.family&.moniker_label || "Family"
+    Current.family&.moniker_label || I18n.t("shared.family_moniker.singular")
   end
 
   def family_moniker_downcase
@@ -80,7 +110,7 @@ module ApplicationHelper
   end
 
   def family_moniker_plural
-    Current.family&.moniker_label_plural || "Families"
+    Current.family&.moniker_label_plural || I18n.t("shared.family_moniker.plural")
   end
 
   def family_moniker_plural_downcase
@@ -190,6 +220,20 @@ module ApplicationHelper
   end
 
   private
+    def safe_lucide_icon(key, **opts)
+      lucide_icon(key, **opts)
+    rescue StandardError => e
+      Rails.logger.warn("[ApplicationHelper] Falling back to key for unknown icon #{key.inspect}: #{e.message}")
+      lucide_icon("key", **opts)
+    end
+
+    def normalize_icon_key(key)
+      normalized = key.to_s.strip
+      return normalized if normalized.blank?
+
+      normalized.downcase
+    end
+
     def calculate_total(item, money_method, negate)
       # Filter out transfer-type transactions from entries
       # Only Entry objects have entryable transactions, Account objects don't
