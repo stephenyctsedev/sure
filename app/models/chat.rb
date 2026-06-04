@@ -51,10 +51,24 @@ class Chat < ApplicationRecord
       prompt.first(80)
     end
 
-    # Returns the default AI model to use for chats
-    # Priority: AI Config > Setting
+    # Returns the default AI model to use for chats.
+    # Resolved from the configured llm_provider so installs that swap providers
+    # don't have to manually update every chat default. Falls through to a
+    # provider that actually has credentials configured, otherwise the chosen
+    # provider's classes would later raise "no LLM provider supports model …"
+    # even when the other provider is configured.
     def default_model
-      Provider::Openai.effective_model.presence || Setting.openai_model
+      prefers_anthropic = Setting.llm_provider == "anthropic"
+
+      if prefers_anthropic && Provider::Anthropic.configured?
+        Provider::Anthropic.effective_model.presence || Setting.anthropic_model
+      elsif Provider::Openai.configured?
+        Provider::Openai.effective_model.presence || Setting.openai_model
+      elsif Provider::Anthropic.configured?
+        Provider::Anthropic.effective_model.presence || Setting.anthropic_model
+      else
+        Provider::Openai.effective_model.presence || Setting.openai_model
+      end
     end
   end
 
@@ -79,7 +93,7 @@ class Chat < ApplicationRecord
 
   def add_error(e)
     update!(error: build_error_payload(e).to_json)
-    broadcast_append target: "messages", partial: "chats/error", locals: { chat: self }
+    broadcast_append target: messages_target, partial: "chats/error", locals: { chat: self }
   end
 
   def presentable_error_message
@@ -93,20 +107,29 @@ class Chat < ApplicationRecord
 
   def clear_error
     update! error: nil
-    broadcast_remove target: "chat-error"
+    broadcast_remove target: error_target
   end
 
   def conversation_messages
     messages.where(type: [ "UserMessage", "AssistantMessage" ])
   end
 
-  def ask_assistant_later(message)
-    clear_error
-    AssistantResponseJob.perform_later(message)
+  def messages_target
+    ActionView::RecordIdentifier.dom_id(self, :messages)
   end
 
-  def ask_assistant(message)
-    assistant.respond_to(message)
+  def error_target
+    ActionView::RecordIdentifier.dom_id(self, :chat_error)
+  end
+
+  def ask_assistant_later(message)
+    clear_error
+    pending = messages.create!(type: "AssistantMessage", content: "", ai_model: message.ai_model, status: :pending)
+    AssistantResponseJob.perform_later(message, pending)
+  end
+
+  def ask_assistant(message, assistant_message: nil)
+    assistant.respond_to(message, assistant_message: assistant_message)
   end
 
   private

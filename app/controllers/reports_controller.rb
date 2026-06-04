@@ -12,7 +12,7 @@ class ReportsController < ApplicationController
     # Build reports sections for collapsible/reorderable UI
     @reports_sections = build_reports_sections
 
-    @breadcrumbs = [ [ "Home", root_path ], [ "Reports", nil ] ]
+    @breadcrumbs = [ [ t("breadcrumbs.home"), root_path ], [ t("breadcrumbs.reports"), nil ] ]
   end
 
   def print
@@ -88,6 +88,15 @@ class ReportsController < ApplicationController
     # It will render *inside* the modal frame.
   end
 
+  def picker
+    @period_type = params[:period_type]&.to_sym || :monthly
+    @start_date = parse_date_param(:start_date) || Date.current.beginning_of_month
+    render partial: "reports/period_picker", locals: {
+      period_type: @period_type,
+      start_date: @start_date
+    }
+  end
+
   private
     def setup_report_data(show_flash: false)
       @period_type = params[:period_type]&.to_sym || :monthly
@@ -102,17 +111,18 @@ class ReportsController < ApplicationController
       @previous_period = build_previous_period
 
       # Get aggregated data
-      @current_income_totals = Current.family.income_statement.income_totals(period: @period)
-      @current_expense_totals = Current.family.income_statement.expense_totals(period: @period)
+      @income_statement = Current.family.income_statement(user: Current.user)
+      @current_income_totals = @income_statement.income_totals(period: @period)
+      @current_expense_totals = @income_statement.expense_totals(period: @period)
 
-      @previous_income_totals = Current.family.income_statement.income_totals(period: @previous_period)
-      @previous_expense_totals = Current.family.income_statement.expense_totals(period: @previous_period)
+      @previous_income_totals = @income_statement.income_totals(period: @previous_period)
+      @previous_expense_totals = @income_statement.expense_totals(period: @previous_period)
 
       # Calculate summary metrics
       @summary_metrics = build_summary_metrics
 
       # Build trend data (last 6 months)
-      @trends_data = build_trends_data
+      @trends_data = build_trends_data(income_statement: @income_statement)
 
       # Net worth metrics
       @net_worth_metrics = build_net_worth_metrics
@@ -128,6 +138,9 @@ class ReportsController < ApplicationController
 
       # Flags for view rendering
       @has_accounts = accessible_accounts.any?
+
+      # Build navigation links for period switching
+      @nav = build_period_navigation
     end
 
     def preferences_params
@@ -233,7 +246,7 @@ class ReportsController < ApplicationController
       when :ytd
         Date.current.beginning_of_year.to_date
       when :last_6_months
-        6.months.ago.beginning_of_month.to_date
+        (Date.current.end_of_month + 1.day - 6.months).beginning_of_month.to_date
       when :custom
         1.month.ago.to_date
       else
@@ -308,7 +321,7 @@ class ReportsController < ApplicationController
       nil
     end
 
-    def build_trends_data
+    def build_trends_data(income_statement:)
       # Generate month-by-month data based on the current period filter
       trends = []
 
@@ -325,8 +338,8 @@ class ReportsController < ApplicationController
 
         period = Period.custom(start_date: month_start, end_date: month_end)
 
-        income = Current.family.income_statement.income_totals(period: period).total
-        expenses = Current.family.income_statement.expense_totals(period: period).total
+        income = income_statement.income_totals(period: period).total
+        expenses = income_statement.expense_totals(period: period).total
 
         trends << {
           month: month_start.strftime("%b %Y"),
@@ -367,8 +380,12 @@ class ReportsController < ApplicationController
       trades = apply_entry_filters(trades)
 
       # Get sort parameters
-      sort_by = params[:sort_by] || "amount"
-      sort_direction = params[:sort_direction] || "desc"
+      sort_by = %w[amount count].include?(params[:sort_by]) ? params[:sort_by] : "amount"
+      sort_direction = %w[asc desc].include?(params[:sort_direction]) ? params[:sort_direction] : "desc"
+      sort_logic = ->(item) do
+        value = (sort_by == "count") ? item[:count] : item[:total]
+        sort_direction == "asc" ? (value || 0) : -(value || 0)
+      end
 
       # Group by category (tracking parent relationship) and type
       # Structure: { [parent_category_id, type] => { parent_data, subcategories: { subcategory_id => data } } }
@@ -435,16 +452,12 @@ class ReportsController < ApplicationController
 
       # Convert to array and sort subcategories
       result = grouped_data.values.map do |parent_data|
-        subcategories = parent_data[:subcategories].values.sort_by { |s| sort_direction == "asc" ? s[:total] : -s[:total] }
+        subcategories = parent_data[:subcategories].values.sort_by(&sort_logic)
         parent_data.merge(subcategories: subcategories)
       end
 
-      # Sort by amount (total) with the specified direction
-      if sort_direction == "asc"
-        result.sort_by { |g| g[:total] }
-      else
-        result.sort_by { |g| -g[:total] }
-      end
+      # Sort by the chosen key with the specified direction
+      result.sort_by(&sort_logic)
     end
 
     def build_investment_metrics
@@ -454,11 +467,11 @@ class ReportsController < ApplicationController
       return { has_investments: false } unless investment_accounts.any?
 
       period_totals = investment_statement.totals(period: @period)
-
       {
         has_investments: true,
         portfolio_value: investment_statement.portfolio_value_money,
         unrealized_trend: investment_statement.unrealized_gains_trend,
+        period_return_trend: investment_statement.period_return_trend(period: @period),
         period_contributions: period_totals.contributions,
         period_withdrawals: period_totals.withdrawals,
         top_holdings: investment_statement.top_holdings(limit: 5),
@@ -1069,5 +1082,66 @@ class ReportsController < ApplicationController
       end
 
       true
+    end
+
+    def build_period_navigation
+      # Called at the end of setup_report_data, so @start_date and @end_date are guaranteed to be set.
+      case @period_type
+      when :monthly
+        prev_start = @start_date.beginning_of_month - 1.month
+        prev_end   = prev_start.end_of_month
+        next_start = @start_date.beginning_of_month + 1.month
+        next_end   = next_start.end_of_month
+        at_latest  = @start_date.beginning_of_month >= Date.current.beginning_of_month
+      when :quarterly
+        prev_start = (@start_date.beginning_of_quarter - 1.day).beginning_of_quarter
+        prev_end   = prev_start.end_of_quarter
+        next_start = @end_date.end_of_quarter + 1.day
+        next_end   = next_start.end_of_quarter
+        at_latest  = @start_date.beginning_of_quarter >= Date.current.beginning_of_quarter
+      when :ytd
+        prev_year  = @start_date.year - 1
+        prev_start = Date.new(prev_year, 1, 1)
+        prev_end   = Date.new(prev_year, 12, 31)
+        next_year  = @start_date.year + 1
+        next_start = Date.new(next_year, 1, 1)
+        next_end   = next_year == Date.current.year ? Date.current : Date.new(next_year, 12, 31)
+        at_latest  = @start_date.year >= Date.current.year
+      when :last_6_months
+        prev_start = @start_date.beginning_of_month - 6.months
+        prev_end   = prev_start + 6.months - 1.day
+        candidate_start = @start_date.beginning_of_month + 6.months
+        if candidate_start + 6.months >= Date.current.beginning_of_month
+          next_end   = Date.current.end_of_month
+          next_start = (next_end + 1.day - 6.months).beginning_of_month
+        else
+          next_start = candidate_start
+          next_end   = next_start + 6.months - 1.day
+        end
+        at_latest  = @end_date >= Date.current.end_of_month
+      else
+        return nil
+      end
+
+      { prev_start: prev_start, prev_end: prev_end, next_start: next_start, next_end: next_end, at_latest: at_latest, label: period_label }
+    end
+
+    def period_label
+      case @period_type
+      when :monthly
+        I18n.l(@start_date, format: :month_year)
+      when :quarterly
+        t("reports.index.period_label.quarterly", quarter: @start_date.quarter, year: @start_date.year)
+      when :ytd
+        if @start_date.year == Date.current.year
+          t("reports.index.period_label.ytd", year: @start_date.year)
+        else
+          t("reports.index.period_label.past_year", year: @start_date.year)
+        end
+      when :last_6_months
+        t("reports.index.period_label.last_6_months",
+          start: I18n.l(@start_date, format: :short_month_year),
+          end: I18n.l(@end_date, format: :short_month_year))
+      end
     end
 end

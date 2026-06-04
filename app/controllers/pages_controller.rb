@@ -26,11 +26,11 @@ class PagesController < ApplicationController
 
     @dashboard_sections = build_dashboard_sections
 
-    @breadcrumbs = [ [ "Home", root_path ], [ "Dashboard", nil ] ]
+    @breadcrumbs = [ [ t("breadcrumbs.home"), root_path ], [ t("breadcrumbs.dashboard"), nil ] ]
   end
 
   def intro
-    @breadcrumbs = [ [ "Home", chats_path ], [ "Intro", nil ] ]
+    @breadcrumbs = [ [ t("breadcrumbs.home"), chats_path ], [ t("breadcrumbs.intro"), nil ] ]
   end
 
   def update_preferences
@@ -49,9 +49,9 @@ class PagesController < ApplicationController
       @release_notes = {
         avatar: "https://github.com/we-promise.png",
         username: "we-promise",
-        name: "Release notes unavailable",
+        name: t("pages.release_notes_unavailable.name"),
         published_at: Date.current,
-        body: "<p>Unable to fetch the latest release notes at this time. Please check back later or visit our <a href='https://github.com/we-promise/sure/releases' target='_blank'>GitHub releases page</a> directly.</p>"
+        body: t("pages.release_notes_unavailable.body_html")
       }
     end
 
@@ -152,7 +152,7 @@ class PagesController < ApplicationController
 
       add_node = ->(unique_key, display_name, value, percentage, color) {
         node_indices[unique_key] ||= begin
-          nodes << { name: display_name, value: value.to_f.round(2), percentage: percentage.to_f.round(1), color: color }
+          nodes << { id: unique_key, name: display_name, value: value.to_f.round(2), percentage: percentage.to_f.round(1), color: color }
           nodes.size - 1
         end
       }

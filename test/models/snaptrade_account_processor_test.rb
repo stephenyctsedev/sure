@@ -129,6 +129,36 @@ class SnaptradeAccountProcessorTest < ActiveSupport::TestCase
     assert_equal 0, @account.holdings.count
   end
 
+  test "processor trusts API total for multi-currency holdings" do
+    security = securities(:aapl)
+    Account.any_instance.stubs(:set_current_balance)
+
+    @snaptrade_account.update!(
+      currency: "CHF",
+      current_balance: BigDecimal("15000.00"),
+      cash_balance: BigDecimal("1000.00"),
+      raw_holdings_payload: [
+        {
+          "symbol" => {
+            "symbol" => { "symbol" => security.ticker, "description" => security.name }
+          },
+          "units" => "10",
+          "price" => "150.00",
+          "currency" => "USD",
+          "average_purchase_price" => "125.50"
+        }
+      ],
+      raw_activities_payload: []
+    )
+
+    SnaptradeAccount::Processor.new(@snaptrade_account).process
+
+    @account.reload
+    assert_equal BigDecimal("15000.00"), @account.balance
+    assert_equal BigDecimal("1000.00"), @account.cash_balance
+    assert_equal "CHF", @account.currency
+  end
+
   # === ActivitiesProcessor Tests ===
 
   test "activities processor maps BUY type to Buy label" do
@@ -210,7 +240,7 @@ class SnaptradeAccountProcessorTest < ActiveSupport::TestCase
     assert_equal "Dividend", tx_entry.entryable.investment_activity_label
   end
 
-  test "activities processor normalizes withdrawal as negative amount" do
+  test "activities processor normalizes withdrawal as positive outflow amount" do
     @snaptrade_account.update!(
       raw_activities_payload: [
         {
@@ -228,7 +258,7 @@ class SnaptradeAccountProcessorTest < ActiveSupport::TestCase
 
     assert_equal 1, result[:transactions]
     tx_entry = @account.entries.find_by(external_id: "activity_withdraw_1")
-    assert tx_entry.amount.negative?
+    assert_equal 1000.00, tx_entry.amount.to_f
   end
 
   test "activities processor skips activities without external_id" do
@@ -289,5 +319,79 @@ class SnaptradeAccountProcessorTest < ActiveSupport::TestCase
 
     entries = @account.entries.where(external_id: "activity_idempotent_1")
     assert_equal 1, entries.count
+  end
+
+  # === Multi-currency cash (issue #1809) ===
+
+  test "upsert_balances! persists all entries and keeps the primary currency in cash_balance" do
+    @snaptrade_account.update!(currency: "USD")
+
+    # Primary (USD) is intentionally NOT first so this asserts the
+    # account-currency selection actually resolves it via dig(:currency, :code)
+    # on the string-keyed payload — not the `entries.first` fallback.
+    @snaptrade_account.upsert_balances!([
+      { "currency" => { "code" => "EUR" }, "cash" => "800.00" },
+      { "currency" => { "code" => "USD" }, "cash" => "1500.00" }
+    ])
+
+    @snaptrade_account.reload
+    assert_equal BigDecimal("1500.00"), @snaptrade_account.cash_balance, "primary (USD) cash stays in cash_balance"
+    assert_equal 2, @snaptrade_account.raw_balances_payload.size, "all balance entries are persisted, not just the primary"
+
+    non_primary = @snaptrade_account.non_primary_cash_entries
+    assert_equal 1, non_primary.size
+    assert_equal "EUR", non_primary.first[:currency]
+  end
+
+  test "holdings processor surfaces non-primary-currency cash as a synthetic holding" do
+    @snaptrade_account.update!(
+      currency: "USD",
+      cash_balance: BigDecimal("1500.00"),
+      raw_balances_payload: [
+        { "currency" => { "code" => "USD" }, "cash" => "1500.00" },
+        { "currency" => { "code" => "EUR" }, "cash" => "800.00" }
+      ]
+    )
+
+    SnaptradeAccount::HoldingsProcessor.new(@snaptrade_account).process
+
+    eur_cash = @account.holdings.joins(:security).where(securities: { kind: "cash" }, currency: "EUR").order(date: :desc).first
+    assert_not_nil eur_cash, "EUR cash must be imported as a synthetic cash holding"
+    assert_equal BigDecimal("800"), eur_cash.qty
+    assert eur_cash.security.cash?, "the holding's security is a synthetic cash security"
+
+    usd_cash = @account.holdings.joins(:security).where(securities: { kind: "cash" }, currency: "USD").exists?
+    assert_not usd_cash, "primary (USD) cash stays in cash_balance, not duplicated as a holding"
+  end
+
+  test "processor surfaces non-primary cash even when there are no security holdings" do
+    @snaptrade_account.update!(
+      currency: "USD",
+      raw_holdings_payload: [],
+      raw_balances_payload: [
+        { "currency" => { "code" => "USD" }, "cash" => "1500.00" },
+        { "currency" => { "code" => "EUR" }, "cash" => "800.00" }
+      ]
+    )
+
+    SnaptradeAccount::Processor.new(@snaptrade_account).process
+
+    eur_cash = @account.holdings.joins(:security).where(securities: { kind: "cash" }, currency: "EUR").exists?
+    assert eur_cash, "processor must run the holdings processor so secondary-currency cash is surfaced even with no stock holdings"
+  end
+
+  test "non-primary cash holding is not duplicated across repeated syncs" do
+    @snaptrade_account.update!(
+      currency: "USD",
+      raw_balances_payload: [
+        { "currency" => { "code" => "USD" }, "cash" => "1500.00" },
+        { "currency" => { "code" => "EUR" }, "cash" => "800.00" }
+      ]
+    )
+
+    2.times { SnaptradeAccount::HoldingsProcessor.new(@snaptrade_account).process }
+
+    eur_cash = @account.holdings.joins(:security).where(securities: { kind: "cash" }, currency: "EUR")
+    assert_equal 1, eur_cash.select(:external_id).distinct.count
   end
 end

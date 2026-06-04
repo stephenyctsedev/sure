@@ -22,10 +22,10 @@ class Holding::Materializer
     # securities are still needed to derive sane balance charts between sync snapshots.
     cleanup_shadowed_calculated_holdings
 
-    # Also remove calculated rows on the provider's latest snapshot date when those
-    # securities are no longer present in the provider payload. This keeps "current"
-    # holdings/balance composition aligned with the provider snapshot while preserving
-    # older calculated history.
+    # Also remove non-provider rows on the provider's latest snapshot date for securities
+    # that appear in the provider snapshot. The provider snapshot is authoritative for
+    # those securities on that day, even when it is denominated in a different currency
+    # than the account or the reverse-calculated holdings.
     cleanup_stale_calculated_rows_on_latest_provider_snapshot
 
     # Reload holdings association to clear any cached stale data
@@ -88,8 +88,27 @@ class Holding::Materializer
             "cost_basis_source" => reconciled[:cost_basis_source]
           )
         else
-          # No cost_basis to set, or existing is better - don't touch cost_basis fields
-          holdings_to_upsert_without_cost << base_attrs
+          # No new calculated value — fall back to the most recent provider
+          # cost_basis for this security on or before the holding date.
+          # Calculated/manual values outrank a provider carry-forward.
+          existing_source = existing&.cost_basis_source
+          preserve_existing = existing&.cost_basis.present? && %w[calculated manual].include?(existing_source)
+
+          if preserve_existing
+            holdings_to_upsert_without_cost << base_attrs
+          else
+            carried = carry_forward_provider_cost_basis(holding)
+
+            if carried && (existing&.cost_basis != carried || existing_source != "provider")
+              holdings_to_upsert_with_cost << base_attrs.merge(
+                "cost_basis" => carried,
+                "cost_basis_source" => "provider"
+              )
+            else
+              # No cost_basis to set, or existing is better - don't touch cost_basis fields
+              holdings_to_upsert_without_cost << base_attrs
+            end
+          end
         end
       end
 
@@ -152,17 +171,12 @@ class Holding::Materializer
         .where(date: provider_snapshot_date)
         .distinct
         .pluck(:security_id)
+      return if provider_security_ids.empty?
 
-      scope = account.holdings
-        .where(account_provider_id: nil, date: provider_snapshot_date)
+      deleted_count = account.holdings
+        .where(account_provider_id: nil, date: provider_snapshot_date, security_id: provider_security_ids)
+        .delete_all
 
-      scope = if provider_security_ids.any?
-        scope.where.not(security_id: provider_security_ids)
-      else
-        scope
-      end
-
-      deleted_count = scope.delete_all
       Rails.logger.info("Cleaned up #{deleted_count} stale calculated holdings on latest provider snapshot date") if deleted_count > 0
     end
 
@@ -170,8 +184,52 @@ class Holding::Materializer
       [ holding.account_id || account.id, holding.security_id, holding.date, holding.currency ]
     end
 
+    # Returns the most recent provider-supplied cost_basis for the given holding's
+    # security on or before its date, converted to the holding's currency.
+    # Used to backfill calculated rows past the provider's last snapshot so
+    # reports keep showing trend data.
+    #
+    # Provider and calculated rows can be denominated in different currencies
+    # (e.g., IBKR reports USD holdings while the reverse calculator converts to
+    # the account's base currency). When they differ, the cost_basis is converted
+    # at the snapshot date — the same convention ReverseCalculator uses for trade
+    # prices — so the result is consistent with trade-derived cost_basis values.
+    def carry_forward_provider_cost_basis(holding)
+      snapshots = provider_cost_basis_snapshots[holding.security_id]
+      return nil if snapshots.blank?
+
+      result = nil
+      snapshots.each do |snap_date, cost_basis, snap_currency|
+        break if snap_date > holding.date
+        result = [ cost_basis, snap_currency, snap_date ]
+      end
+      return nil unless result
+
+      cost_basis, snap_currency, snap_date = result
+      return cost_basis if snap_currency == holding.currency
+
+      Money.new(cost_basis, snap_currency).exchange_to(holding.currency, date: snap_date).amount
+    rescue Money::ConversionError
+      nil
+    end
+
+    def provider_cost_basis_snapshots
+      @provider_cost_basis_snapshots ||= begin
+        ids = @holdings.map(&:security_id).uniq
+        account.holdings
+          .where.not(account_provider_id: nil)
+          .where.not(cost_basis: nil)
+          .where(security_id: ids)
+          .order(:date) # ascending required: carry_forward_provider_cost_basis scans and breaks on snap_date > holding.date
+          .pluck(:security_id, :currency, :date, :cost_basis)
+          .each_with_object(Hash.new { |h, k| h[k] = [] }) do |(security_id, currency, date, cost_basis), memo|
+            memo[security_id] << [ date, cost_basis, currency ]
+          end
+      end
+    end
+
     def purge_stale_holdings
-      portfolio_security_ids = account.entries.trades.map { |entry| entry.entryable.security_id }.uniq
+      portfolio_security_ids = account.trades.distinct.pluck(:security_id)
 
       # Never delete provider-sourced holdings - they're authoritative from the provider
       # If there are no securities in the portfolio, only delete non-provider holdings

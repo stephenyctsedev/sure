@@ -99,6 +99,13 @@ class AccountTest < ActiveSupport::TestCase
     assert_equal opening_date, opening_anchor.entry.date
   end
 
+  test "accountable display names expose singular and group contexts" do
+    assert_equal "Investment", Investment.singular_display_name
+    assert_equal "Investments", Investment.display_name
+    assert_equal "Cash", Depository.singular_display_name
+    assert_equal "Cash", Depository.display_name
+  end
+
   test "gets short/long subtype label" do
     investment = Investment.new(subtype: "hsa")
     account = @family.accounts.create!(
@@ -148,10 +155,32 @@ class AccountTest < ActiveSupport::TestCase
     assert_equal I18n.t("accounts.tax_treatments.taxable"), account.tax_treatment_label
   end
 
-  test "tax_treatment returns nil for non-investment accounts" do
-    # Depository accounts don't have tax_treatment
+  test "tax_treatment returns nil for non-HSA depository accounts" do
+    # Depository exposes a `tax_treatment` method so HSA cash flips
+    # tax-advantaged, but non-HSA subtypes (checking, savings, cd,
+    # money_market) return nil. nil still reads as taxable via `taxable?`,
+    # and keeps `tax_treatment.present?` false so the header tax badge does
+    # not appear on ordinary bank accounts that never displayed it before.
     assert_nil @account.tax_treatment
     assert_nil @account.tax_treatment_label
+    assert_not @account.tax_treatment.present?
+    assert @account.taxable?
+  end
+
+  test "tax_treatment returns nil for accountables that do not implement it" do
+    # CreditCard / Loan / Property / OtherAsset / OtherLiability do not
+    # implement `tax_treatment`, so the `TaxTreatable#respond_to?` short-
+    # circuit still returns nil for them.
+    credit_card_account = @family.accounts.create!(
+      owner: @admin,
+      name: "Test Credit Card",
+      balance: 100,
+      currency: "USD",
+      accountable: CreditCard.new
+    )
+
+    assert_nil credit_card_account.tax_treatment
+    assert_nil credit_card_account.tax_treatment_label
   end
 
   test "tax_advantaged? returns true for tax-advantaged accounts" do
@@ -168,6 +197,20 @@ class AccountTest < ActiveSupport::TestCase
     assert_not account.taxable?
   end
 
+  test "tax_advantaged? returns true for HSA depository accounts" do
+    hsa_depository = @family.accounts.create!(
+      owner: @admin,
+      name: "Fidelity HSA Cash",
+      balance: 3_000,
+      currency: "USD",
+      accountable: Depository.new(subtype: "hsa")
+    )
+
+    assert_equal :tax_advantaged, hsa_depository.tax_treatment
+    assert hsa_depository.tax_advantaged?
+    assert_not hsa_depository.taxable?
+  end
+
   test "tax_advantaged? returns false for taxable accounts" do
     investment = Investment.new(subtype: "brokerage")
     account = @family.accounts.create!(
@@ -182,8 +225,9 @@ class AccountTest < ActiveSupport::TestCase
     assert account.taxable?
   end
 
-  test "taxable? returns true for accounts without tax_treatment" do
-    # Depository accounts
+  test "taxable? returns true for non-HSA depository accounts" do
+    # `@account` is the checking depository fixture; `tax_treatment` is
+    # `nil` (no subtype override), which `taxable?` reads as true.
     assert @account.taxable?
     assert_not @account.tax_advantaged?
   end
@@ -203,6 +247,42 @@ class AccountTest < ActiveSupport::TestCase
     end
 
     assert_not ActiveStorage::Attachment.exists?(attachment_id)
+  end
+
+  test "destroying account moves linked statements to inbox after commit" do
+    statement = AccountStatement.create_from_upload!(
+      family: @family,
+      account: @account,
+      file: uploaded_file(filename: "statement.csv", content_type: "text/csv", content: "date,amount\n2024-01-01,1\n")
+    )
+    statement.update!(match_confidence: 0.8)
+
+    @account.destroy!
+
+    statement.reload
+    assert_nil statement.account_id
+    assert_equal "unmatched", statement.review_status
+    assert_nil statement.match_confidence
+  end
+
+  test "rolled back account destroy keeps linked statements unchanged" do
+    statement = AccountStatement.create_from_upload!(
+      family: @family,
+      account: @account,
+      file: uploaded_file(filename: "statement.csv", content_type: "text/csv", content: "date,amount\n2024-01-01,1\n")
+    )
+    statement.update!(match_confidence: 0.8)
+
+    Account.transaction do
+      @account.destroy!
+      raise ActiveRecord::Rollback
+    end
+
+    statement.reload
+    assert Account.exists?(@account.id)
+    assert_equal @account.id, statement.account_id
+    assert_equal "linked", statement.review_status
+    assert_equal 0.8.to_d, statement.match_confidence
   end
 
   # Account sharing tests
@@ -287,5 +367,93 @@ class AccountTest < ActiveSupport::TestCase
     assert_not_nil share
     assert_equal "read_write", share.permission
     assert share.include_in_finances?
+  end
+
+  test "current_holdings prefers latest provider snapshot holdings across currencies" do
+    account = @family.accounts.create!(
+      owner: @admin,
+      name: "Linked Brokerage",
+      balance: 1000,
+      currency: "USD",
+      accountable: Investment.new
+    )
+
+    coinstats_item = @family.coinstats_items.create!(name: "CoinStats", api_key: "test-key")
+    coinstats_account = coinstats_item.coinstats_accounts.create!(name: "Brokerage", currency: "USD")
+    account_provider = AccountProvider.create!(account: account, provider: coinstats_account)
+
+    eur_security = Security.create!(ticker: "ASML", name: "ASML")
+    chf_security = Security.create!(ticker: "NOVN", name: "Novartis")
+
+    provider_holding = account.holdings.create!(
+      security: eur_security,
+      date: Date.current,
+      qty: 2,
+      price: 500,
+      amount: 1000,
+      currency: "EUR",
+      account_provider: account_provider,
+      cost_basis: 450
+    )
+
+    account.holdings.create!(
+      security: eur_security,
+      date: Date.current,
+      qty: 2,
+      price: 540,
+      amount: 1080,
+      currency: "USD"
+    )
+
+    second_provider_holding = account.holdings.create!(
+      security: chf_security,
+      date: Date.current,
+      qty: 3,
+      price: 90,
+      amount: 270,
+      currency: "CHF",
+      account_provider: account_provider,
+      cost_basis: 80
+    )
+
+    assert_equal [ provider_holding.id, second_provider_holding.id ].sort, account.current_holdings.pluck(:id).sort
+    assert_equal %w[CHF EUR], account.current_holdings.pluck(:currency).sort
+  end
+
+  test "on account destroyed cascade transfer destroyed" do
+    outflow_account = @family.accounts.create!({
+      owner: @admin,
+      name: "test_account_outflow",
+      balance: 100,
+      currency: "USD",
+      accountable_type: "Depository",
+      accountable_attributes: {}
+    })
+    inflow_account = @family.accounts.create!({
+      owner: @admin,
+      name: "test_account_inflow",
+      balance: 100,
+      currency: "USD",
+      accountable_type: "Depository",
+      accountable_attributes: {}
+    })
+
+    transfer = create_transfer(
+      from_account: outflow_account,
+      to_account: inflow_account,
+      amount: 50
+    )
+
+    outflow_transaction = transfer.outflow_transaction
+
+    outflow_transaction.reload
+    assert_equal "funds_movement", outflow_transaction.kind
+
+    inflow_account.destroy!
+
+    assert_raises(ActiveRecord::RecordNotFound) { transfer.reload }
+
+    outflow_transaction.reload
+    assert_equal "standard", outflow_transaction.kind
   end
 end

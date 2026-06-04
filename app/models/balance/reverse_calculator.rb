@@ -12,6 +12,7 @@ class Balance::ReverseCalculator < Balance::BaseCalculator
       # Calculates in reverse-chronological order (End of day -> Start of day)
       account.current_anchor_date.downto(account.opening_anchor_date).map do |date|
         flows = flows_for_date(date)
+        valuation = sync_cache.get_valuation(date)
 
         if use_opening_anchor_for_date?(date)
           end_cash_balance = derive_cash_balance_on_date_from_total(
@@ -23,6 +24,21 @@ class Balance::ReverseCalculator < Balance::BaseCalculator
           start_cash_balance = end_cash_balance
           start_non_cash_balance = end_non_cash_balance
           market_value_change = 0
+        elsif valuation && valuation.entryable.reconciliation?
+          # Reconciliation waypoint: hard-reset the END-of-day balance to the
+          # API-reported value, neutralizing any drift accumulated from missing
+          # transactions between here and the next anchor. The START is still
+          # derived from this day's own flows, so a same-day transaction is
+          # attributed exactly once (and not added on top of the waypoint).
+          end_cash_balance = derive_cash_balance_on_date_from_total(
+            total_balance: valuation.amount,
+            date: date
+          )
+          end_non_cash_balance = valuation.amount - end_cash_balance
+
+          start_cash_balance = derive_start_cash_balance(end_cash_balance: end_cash_balance, date: date)
+          start_non_cash_balance = derive_start_non_cash_balance(end_non_cash_balance: end_non_cash_balance, date: date)
+          market_value_change = market_value_change_on_date(date, flows)
         else
           start_cash_balance = derive_start_cash_balance(end_cash_balance: end_cash_balance, date: date)
           start_non_cash_balance = derive_start_non_cash_balance(end_non_cash_balance: end_non_cash_balance, date: date)
@@ -73,9 +89,9 @@ class Balance::ReverseCalculator < Balance::BaseCalculator
       derive_non_cash_balance(end_non_cash_balance, date, direction: :reverse)
     end
 
-    # Reverse syncs are a bit different than forward syncs because we do not allow "reconciliation" valuations
-    # to be used at all. This is primarily to keep the code and the UI easy to understand. For a more detailed
-    # explanation, see the test suite.
+    # Checks if this date should use the opening anchor balance instead of deriving it.
+    # Only the opening_anchor_date itself gets this treatment — reconciliation waypoints
+    # are handled separately in the calculate loop above.
     def use_opening_anchor_for_date?(date)
       account.has_opening_anchor? && date == account.opening_anchor_date
     end

@@ -31,6 +31,17 @@ RSpec.describe 'API V1 Imports', type: :request do
     )
   end
 
+  let(:api_key_without_read_scope) do
+    key = ApiKey.generate_secure_key
+    ApiKey.new(
+      user: user,
+      name: 'No Read Docs Key',
+      key: key,
+      scopes: %w[write],
+      source: 'web'
+    ).tap { |api_key| api_key.save!(validate: false) }
+  end
+
   let(:'X-Api-Key') { api_key.plain_key }
 
   let(:account) do
@@ -49,6 +60,16 @@ RSpec.describe 'API V1 Imports', type: :request do
       status: 'pending',
       account: account,
       raw_file_str: "date,amount,name\n01/01/2024,10.00,Test Transaction"
+    )
+  end
+
+  let!(:import_row) do
+    pending_import.rows.create!(
+      source_row_number: 1,
+      date: '01/01/2024',
+      amount: '10.00',
+      currency: 'USD',
+      name: 'Test Transaction'
     )
   end
 
@@ -76,7 +97,7 @@ RSpec.describe 'API V1 Imports', type: :request do
                 schema: { type: :string, enum: %w[pending complete importing reverting revert_failed failed] }
       parameter name: :type, in: :query, required: false,
                 description: 'Filter by import type',
-                schema: { type: :string, enum: %w[TransactionImport TradeImport AccountImport MintImport CategoryImport RuleImport SureImport] }
+                schema: { type: :string, enum: %w[TransactionImport TradeImport AccountImport MintImport ActualImport CategoryImport RuleImport SureImport] }
 
       response '200', 'imports listed' do
         schema '$ref' => '#/components/schemas/ImportCollection'
@@ -102,7 +123,7 @@ RSpec.describe 'API V1 Imports', type: :request do
     end
 
     post 'Create import' do
-      description 'Create a new import from raw CSV content, inline Sure NDJSON content, or an uploaded Sure NDJSON file.'
+      description 'Create a new import from raw CSV content, inline Sure NDJSON content, or an uploaded Sure NDJSON file. CSV content is limited to 10MB.'
       tags 'Imports'
       security [ { apiKeyAuth: [] } ]
       consumes 'application/json', 'multipart/form-data'
@@ -113,11 +134,11 @@ RSpec.describe 'API V1 Imports', type: :request do
         properties: {
           raw_file_content: {
             type: :string,
-            description: 'Raw CSV or Sure NDJSON content as a string. Required for SureImport unless a multipart file is uploaded.'
+            description: 'Raw CSV or Sure NDJSON content as a string. CSV content is limited to 10MB. Required for SureImport unless a multipart file is uploaded.'
           },
           type: {
             type: :string,
-            enum: %w[TransactionImport TradeImport AccountImport MintImport CategoryImport RuleImport SureImport],
+            enum: %w[TransactionImport TradeImport AccountImport MintImport ActualImport CategoryImport RuleImport SureImport],
             description: 'Import type (defaults to TransactionImport)'
           },
           account_id: {
@@ -229,7 +250,7 @@ RSpec.describe 'API V1 Imports', type: :request do
         run_test!
       end
 
-      response '422', 'validation error - file too large' do
+      response '422', 'validation error or publish rejection' do
         schema oneOf: [
           { '$ref' => '#/components/schemas/ErrorResponse' },
           { '$ref' => '#/components/schemas/ErrorResponseWithImportId' }
@@ -248,9 +269,22 @@ RSpec.describe 'API V1 Imports', type: :request do
       response '500', 'import uploaded but publish enqueue failed' do
         schema '$ref' => '#/components/schemas/ErrorResponseWithImportId'
 
+        before do
+          allow(ImportJob).to receive(:perform_later).and_raise(StandardError, 'queue offline')
+        end
+
         let(:body) do
           {
-            raw_file_content: { type: 'Account', data: { id: 'account_1', name: 'Checking' } }.to_json,
+            raw_file_content: {
+              type: 'Account',
+              data: {
+                id: 'account_1',
+                name: 'Checking',
+                balance: '100',
+                currency: 'USD',
+                accountable_type: 'Depository'
+              }
+            }.to_json,
             type: 'SureImport',
             publish: 'true'
           }
@@ -265,7 +299,7 @@ RSpec.describe 'API V1 Imports', type: :request do
     parameter name: :id, in: :path, type: :string, required: true, description: 'Import ID'
 
     get 'Retrieve an import' do
-      description 'Retrieve detailed information about a specific import, including configuration and row statistics.'
+      description 'Retrieve detailed information about a specific import, including configuration, row statistics, and SureImport readback verification when available.'
       tags 'Imports'
       security [ { apiKeyAuth: [] } ]
       produces 'application/json'
@@ -282,6 +316,185 @@ RSpec.describe 'API V1 Imports', type: :request do
         schema '$ref' => '#/components/schemas/ErrorResponse'
 
         let(:id) { SecureRandom.uuid }
+
+        run_test!
+      end
+    end
+  end
+
+  path '/api/v1/imports/{id}/rows' do
+    parameter name: :id, in: :path, type: :string, required: true, description: 'Import ID'
+
+    get 'List import row diagnostics' do
+      description 'List sanitized import rows with validation errors and mapping resolution state.'
+      tags 'Imports'
+      security [ { apiKeyAuth: [] } ]
+      produces 'application/json'
+      parameter name: :page, in: :query, type: :integer, required: false,
+                description: 'Page number (default: 1)'
+      parameter name: :per_page, in: :query, type: :integer, required: false,
+                description: 'Items per page (default: 25, max: 100)'
+
+      let(:id) { pending_import.id }
+
+      response '200', 'import rows listed' do
+        schema '$ref' => '#/components/schemas/ImportRowDiagnosticCollection'
+
+        run_test!
+      end
+
+      response '401', 'unauthorized' do
+        schema '$ref' => '#/components/schemas/ErrorResponse'
+
+        let(:'X-Api-Key') { nil }
+
+        run_test!
+      end
+
+      response '403', 'insufficient scope' do
+        schema '$ref' => '#/components/schemas/ErrorResponse'
+
+        let(:'X-Api-Key') { api_key_without_read_scope.plain_key }
+
+        run_test!
+      end
+
+      response '404', 'import not found' do
+        schema '$ref' => '#/components/schemas/ErrorResponse'
+
+        let(:id) { SecureRandom.uuid }
+
+        run_test!
+      end
+
+      response '500', 'internal server error' do
+        schema '$ref' => '#/components/schemas/ErrorResponse'
+
+        before do
+          allow_any_instance_of(Import::Row).to receive(:valid?).and_raise(StandardError, 'validation down')
+        end
+
+        run_test!
+      end
+    end
+  end
+
+  path '/api/v1/imports/preflight' do
+    post 'Validate import content without creating an import' do
+      description 'Validate CSV or Sure NDJSON import content and return counts, headers, warnings, and validation errors without persisting an import or enqueueing jobs. CSV content is limited to 10MB.'
+      tags 'Imports'
+      security [ { apiKeyAuth: [] } ]
+      consumes 'application/json', 'multipart/form-data'
+      produces 'application/json'
+
+      parameter name: :body, in: :body, required: false, schema: {
+        type: :object,
+        properties: {
+          raw_file_content: {
+            type: :string,
+            description: 'Raw CSV or Sure NDJSON content as a string. CSV content is limited to 10MB.'
+          },
+          file: {
+            type: :string,
+            format: :binary,
+            description: 'CSV or Sure NDJSON upload when using multipart/form-data. CSV files are limited to 10MB.'
+          },
+          type: {
+            type: :string,
+            enum: %w[TransactionImport TradeImport AccountImport MintImport ActualImport CategoryImport RuleImport SureImport],
+            description: 'Import type to validate (defaults to TransactionImport)'
+          },
+          account_id: {
+            type: :string,
+            format: :uuid,
+            description: 'Account ID used for account-scoped CSV import validation'
+          },
+          date_col_label: { type: :string, description: 'CSV imports only. Header name for the date column' },
+          amount_col_label: { type: :string, description: 'CSV imports only. Header name for the amount column' },
+          name_col_label: { type: :string, description: 'CSV imports only. Header name for the transaction name column' },
+          category_col_label: { type: :string, description: 'CSV imports only. Header name for the category column' },
+          tags_col_label: { type: :string, description: 'CSV imports only. Header name for the tags column' },
+          notes_col_label: { type: :string, description: 'CSV imports only. Header name for the notes column' },
+          account_col_label: { type: :string, description: 'CSV imports only. Header name for the account column' },
+          qty_col_label: { type: :string, description: 'CSV trade imports only. Header name for the quantity column' },
+          ticker_col_label: { type: :string, description: 'CSV trade imports only. Header name for the ticker column' },
+          price_col_label: { type: :string, description: 'CSV trade imports only. Header name for the price column' },
+          entity_type_col_label: { type: :string, description: 'CSV imports only. Header name for the entity type column' },
+          currency_col_label: { type: :string, description: 'CSV imports only. Header name for the currency column' },
+          exchange_operating_mic_col_label: { type: :string, description: 'CSV trade imports only. Header name for the exchange operating MIC column' },
+          date_format: { type: :string, description: 'CSV imports only. Date format pattern' },
+          number_format: {
+            type: :string,
+            enum: [ '1,234.56', '1.234,56', '1 234,56', '1,234' ],
+            description: 'CSV imports only. Number format for parsing amounts'
+          },
+          signage_convention: {
+            type: :string,
+            enum: %w[inflows_positive inflows_negative],
+            description: 'CSV imports only. How to interpret positive/negative amounts'
+          },
+          col_sep: {
+            type: :string,
+            enum: [ ',', ';' ],
+            description: 'CSV imports only. Column separator'
+          },
+          rows_to_skip: {
+            type: :integer,
+            minimum: 0,
+            description: 'CSV imports only. Number of leading rows to skip before reading headers'
+          },
+          amount_type_strategy: {
+            type: :string,
+            enum: %w[signed_amount custom_column],
+            description: 'CSV imports only. Amount parsing strategy'
+          },
+          amount_type_inflow_value: {
+            type: :string,
+            description: 'CSV imports only. Column value that marks an amount as an inflow when using custom_column strategy'
+          }
+        }
+      }
+
+      response '200', 'import content preflighted' do
+        schema '$ref' => '#/components/schemas/ImportPreflightResponse'
+
+        let(:body) do
+          {
+            raw_file_content: "date,amount,name\n01/15/2024,50.00,New Transaction",
+            type: 'TransactionImport',
+            account_id: account.id,
+            date_col_label: 'date',
+            amount_col_label: 'amount',
+            name_col_label: 'name'
+          }
+        end
+
+        run_test!
+      end
+
+      response '401', 'unauthorized' do
+        schema '$ref' => '#/components/schemas/ErrorResponse'
+        let(:'X-Api-Key') { nil }
+        let(:body) { { raw_file_content: "date,amount\n01/15/2024,50.00" } }
+
+        run_test!
+      end
+
+      response '422', 'missing or invalid content' do
+        schema '$ref' => '#/components/schemas/ErrorResponse'
+        let(:body) { { type: 'SureImport' } }
+
+        run_test!
+      end
+
+      response '404', 'account not found' do
+        schema '$ref' => '#/components/schemas/ErrorResponse'
+        let(:body) do
+          {
+            raw_file_content: "date,amount,name\n01/15/2024,50.00,New Transaction",
+            account_id: SecureRandom.uuid
+          }
+        end
 
         run_test!
       end

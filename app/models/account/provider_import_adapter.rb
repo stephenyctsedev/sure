@@ -44,12 +44,36 @@ class Account::ProviderImportAdapter
         raise ArgumentError, "Entry with external_id '#{external_id}' already exists with different entryable type: #{entry.entryable_type}"
       end
 
+      # Determine early whether the incoming transaction is pending — needed by both
+      # the protection check (pending→booked bypass) and the auto-claim path below.
+      incoming_pending = false
+      if extra.is_a?(Hash)
+        pending_extra = extra.with_indifferent_access
+        boolean_type = ActiveModel::Type::Boolean.new
+        incoming_pending = Transaction::PENDING_PROVIDERS.any? do |provider|
+          boolean_type.cast(pending_extra.dig(provider, "pending"))
+        end
+      end
+
       # === PROTECTION CHECK: Skip entries that should not be overwritten ===
       # Check persisted Transaction entries for protection flags before making changes.
       # This prevents sync from overwriting user edits, CSV imports, or excluded entries.
       if entry.persisted?
         skip_reason = determine_skip_reason(entry)
         if skip_reason
+          # Pending→booked bypass for user_modified entries: clear the stale pending flag
+          # when the provider delivers a booked version of the same transaction.
+          # Some ASPSPs (e.g. Revolut Italy via Enable Banking) reuse the same transaction_id
+          # for pending and booked, so the entry is found by external_id rather than going
+          # through the auto-claim path. Without this, a user who categorised a pending entry
+          # (setting user_modified=true) would see the pending badge stuck forever.
+          # Excluded and import_locked entries are intentionally left untouched.
+          if skip_reason == "user_modified" && !incoming_pending && entry.entryable.is_a?(Transaction)
+            entry_is_pending = Transaction::PENDING_PROVIDERS.any? { |p| entry.transaction.extra&.dig(p, "pending") }
+            if entry_is_pending
+              entry.transaction.update!(extra: clear_pending_flags_from_extra(entry.transaction.extra))
+            end
+          end
           record_skip(entry, skip_reason)
           return entry
         end
@@ -76,17 +100,6 @@ class Account::ProviderImportAdapter
         end
       end
 
-      # If still a new entry and this is a POSTED transaction, check for matching pending transactions
-      incoming_pending = false
-      if extra.is_a?(Hash)
-        pending_extra = extra.with_indifferent_access
-        incoming_pending =
-          ActiveModel::Type::Boolean.new.cast(pending_extra.dig("simplefin", "pending")) ||
-          ActiveModel::Type::Boolean.new.cast(pending_extra.dig("plaid", "pending")) ||
-          ActiveModel::Type::Boolean.new.cast(pending_extra.dig("lunchflow", "pending")) ||
-          ActiveModel::Type::Boolean.new.cast(pending_extra.dig("enable_banking", "pending"))
-      end
-
       if entry.new_record? && !incoming_pending
         pending_match = nil
 
@@ -109,18 +122,60 @@ class Account::ProviderImportAdapter
         end
 
         if pending_match
+          old_pending_external_id = pending_match.external_id
+          pending_entry_date      = pending_match.date
           entry = pending_match
           entry.assign_attributes(external_id: external_id)
+
+          # Clear the pending flag so this entry no longer shows as pending after being claimed
+          # by a booked transaction. Also record the old external_id so the sync engine can
+          # exclude it from re-import (preventing the old pending from being recreated on the
+          # next sync when the stored raw payload still contains the pending transaction data).
+          if entry.entryable.is_a?(Transaction)
+            ex = clear_pending_flags_from_extra(entry.transaction.extra)
+            if old_pending_external_id.present?
+              existing_claims = Array.wrap(ex["auto_claimed_pending_ids"])
+              ex["auto_claimed_pending_ids"] = (existing_claims + [ old_pending_external_id ]).uniq
+            end
+            entry.transaction.extra = ex
+          end
+        end
+      end
+
+      # Pending→booked for same-external-id providers (non-protected path).
+      # For ASPSPs like Revolut Italy that reuse the same transaction_id for pending and
+      # booked, the auto-claim path above is skipped (entry.persisted? from the start).
+      # If extra is nil (no FX, no MCC) the deep-merge block later is skipped too, so we
+      # must clear the stale pending flag here before the final save.
+      # (The auto-claim path already clears it in-memory, so this is a no-op there.)
+      if !incoming_pending && entry.entryable.is_a?(Transaction)
+        if Transaction::PENDING_PROVIDERS.any? { |p| entry.transaction.extra&.dig(p, "pending") }
+          entry.transaction.extra = clear_pending_flags_from_extra(entry.transaction.extra)
         end
       end
 
       # Track if this is a new posted transaction (for fuzzy suggestion after save)
       is_new_posted = entry.new_record? && !incoming_pending
 
+      # Preserve the original pending date across all syncs:
+      # - First claim: pending_entry_date is captured from the pending match above
+      # - Subsequent syncs: entry already exists (no pending_match found), so check
+      #   auto_claimed_pending_ids which signals it was previously auto-claimed and
+      #   keep entry.date (the pending date stored on first claim) unchanged
+      effective_date = if pending_entry_date
+        pending_entry_date
+      elsif !entry.new_record? &&
+            entry.entryable.is_a?(Transaction) &&
+            entry.transaction.extra&.key?("auto_claimed_pending_ids")
+        entry.date
+      else
+        date
+      end
+
       entry.assign_attributes(
         amount: amount,
         currency: currency,
-        date: date
+        date: effective_date
       )
 
       # Use enrichment pattern to respect user overrides
@@ -184,6 +239,19 @@ class Account::ProviderImportAdapter
 
       entry.save!
       entry.transaction.save! if entry.transaction.changed?
+
+      # Auto-resolve any open Goal pledges on this account whose tolerance
+      # window matches the posted transaction. Idempotent via the partial-unique
+      # index on transactions.extra->'goal'->>'pledge_id'.
+      #
+      # Short-circuit when the account isn't linked to any goal: a 2k-row
+      # historical Plaid import on an unlinked account otherwise pays one
+      # SELECT per row. goal_accounts membership is stable across a sync
+      # batch, so memoize once per adapter instance (one query per account
+      # synced, not per transaction).
+      if !incoming_pending && account_linked_to_any_goal?
+        GoalPledge::Reconciler.new(entry).run
+      end
 
       # AFTER save: For NEW posted transactions, check for fuzzy matches to SUGGEST (not auto-claim)
       # This handles tip adjustments where auto-matching is too risky
@@ -551,8 +619,9 @@ class Account::ProviderImportAdapter
   # @param external_id [String, nil] Provider's unique ID (optional, for deduplication)
   # @param source [String] Provider name
   # @param activity_label [String, nil] Investment activity label (e.g., "Buy", "Sell", "Reinvestment")
+  # @param exchange_rate [BigDecimal, Numeric, nil] Optional provider-supplied FX rate into the account currency
   # @return [Entry] The created entry with trade
-  def import_trade(security:, quantity:, price:, amount:, currency:, date:, name: nil, external_id: nil, source:, activity_label: nil)
+  def import_trade(security:, quantity:, price:, amount:, currency:, date:, name: nil, external_id: nil, source:, activity_label: nil, exchange_rate: nil)
     raise ArgumentError, "security is required" if security.nil?
     raise ArgumentError, "source is required" if source.blank?
 
@@ -585,13 +654,16 @@ class Account::ProviderImportAdapter
       end
 
       # Always update Trade attributes (works for both new and existing records)
-      entry.entryable.assign_attributes(
+      trade_attributes = {
         security: security,
         qty: quantity,
         price: price,
         currency: currency,
         investment_activity_label: activity_label || (quantity > 0 ? "Buy" : "Sell")
-      )
+      }
+      trade_attributes[:exchange_rate] = exchange_rate unless exchange_rate.nil?
+
+      entry.entryable.assign_attributes(trade_attributes)
 
       entry.assign_attributes(
         date: date,
@@ -697,6 +769,7 @@ class Account::ProviderImportAdapter
         OR (transactions.extra -> 'plaid' ->> 'pending')::boolean = true
         OR (transactions.extra -> 'lunchflow' ->> 'pending')::boolean = true
         OR (transactions.extra -> 'enable_banking' ->> 'pending')::boolean = true
+        OR (transactions.extra -> 'akahu' ->> 'pending')::boolean = true
       SQL
       .order(date: :desc) # Prefer most recent pending transaction
 
@@ -744,6 +817,7 @@ class Account::ProviderImportAdapter
         OR (transactions.extra -> 'plaid' ->> 'pending')::boolean = true
         OR (transactions.extra -> 'lunchflow' ->> 'pending')::boolean = true
         OR (transactions.extra -> 'enable_banking' ->> 'pending')::boolean = true
+        OR (transactions.extra -> 'akahu' ->> 'pending')::boolean = true
       SQL
 
     # If merchant_id is provided, prioritize matching by merchant
@@ -814,6 +888,7 @@ class Account::ProviderImportAdapter
         OR (transactions.extra -> 'plaid' ->> 'pending')::boolean = true
         OR (transactions.extra -> 'lunchflow' ->> 'pending')::boolean = true
         OR (transactions.extra -> 'enable_banking' ->> 'pending')::boolean = true
+        OR (transactions.extra -> 'akahu' ->> 'pending')::boolean = true
       SQL
 
     # For low confidence, require BOTH merchant AND name match (stronger signal needed)
@@ -924,4 +999,26 @@ class Account::ProviderImportAdapter
       account_name: entry.account.name
     }
   end
+
+  private
+
+    # Memoized per adapter instance (which is per-account). Membership in
+    # goal_accounts is stable across a sync batch.
+    def account_linked_to_any_goal?
+      return @account_linked_to_any_goal if defined?(@account_linked_to_any_goal)
+
+      @account_linked_to_any_goal = account.goal_accounts.exists?
+    end
+
+    def clear_pending_flags_from_extra(extra)
+      ex = (extra || {}).deep_dup
+      ex = {} unless ex.is_a?(Hash)
+      Transaction::PENDING_PROVIDERS.each do |provider|
+        next unless ex.key?(provider)
+        next unless ex[provider].is_a?(Hash)
+        ex[provider].delete("pending")
+        ex.delete(provider) if ex[provider].empty?
+      end
+      ex
+    end
 end

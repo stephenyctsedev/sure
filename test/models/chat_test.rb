@@ -18,14 +18,25 @@ class ChatTest < ActiveSupport::TestCase
     assert_equal 3, chat.conversation_messages.count
   end
 
+  test "uses chat-scoped stream targets" do
+    first_chat = chats(:one)
+    second_chat = chats(:two)
+
+    assert_not_equal "messages", first_chat.messages_target
+    assert_not_equal "chat-error", first_chat.error_target
+    assert_not_equal first_chat.messages_target, second_chat.messages_target
+    assert_not_equal first_chat.error_target, second_chat.error_target
+  end
+
   test "creates with initial message" do
     prompt = "Test prompt"
 
     assert_difference "@user.chats.count", 1 do
       chat = @user.chats.start!(prompt, model: "gpt-4.1")
 
-      assert_equal 1, chat.messages.count
+      assert_equal 2, chat.messages.count
       assert_equal 1, chat.messages.where(type: "UserMessage").count
+      assert_equal 1, chat.messages.where(type: "AssistantMessage", status: "pending").count
     end
   end
 
@@ -35,8 +46,8 @@ class ChatTest < ActiveSupport::TestCase
     assert_difference "@user.chats.count", 1 do
       chat = @user.chats.start!(prompt, model: nil)
 
-      assert_equal 1, chat.messages.count
-      assert_equal Provider::Openai::DEFAULT_MODEL, chat.messages.first.ai_model
+      assert_equal 2, chat.messages.count
+      assert_equal Chat.default_model, chat.messages.find_by!(type: "UserMessage").ai_model
     end
   end
 
@@ -46,9 +57,36 @@ class ChatTest < ActiveSupport::TestCase
     assert_difference "@user.chats.count", 1 do
       chat = @user.chats.start!(prompt, model: "")
 
-      assert_equal 1, chat.messages.count
-      assert_equal Provider::Openai::DEFAULT_MODEL, chat.messages.first.ai_model
+      assert_equal 2, chat.messages.count
+      assert_equal Chat.default_model, chat.messages.find_by!(type: "UserMessage").ai_model
     end
+  end
+
+  # These three tests assert routing (which provider's effective_model wins),
+  # not the constant value itself — the assertion side reads through
+  # Provider::*.effective_model so ENV overrides like ANTHROPIC_MODEL /
+  # OPENAI_MODEL don't make the tests flake.
+  test "default_model returns Anthropic's effective_model when LLM_PROVIDER=anthropic and Anthropic is configured" do
+    Provider::Anthropic.stubs(:configured?).returns(true)
+    Setting.stubs(:llm_provider).returns("anthropic")
+
+    assert_equal Provider::Anthropic.effective_model, Chat.default_model
+  end
+
+  test "default_model falls back to OpenAI's effective_model when Anthropic is preferred but unconfigured" do
+    Provider::Anthropic.stubs(:configured?).returns(false)
+    Provider::Openai.stubs(:configured?).returns(true)
+    Setting.stubs(:llm_provider).returns("anthropic")
+
+    assert_equal Provider::Openai.effective_model, Chat.default_model
+  end
+
+  test "default_model uses Anthropic's effective_model when OpenAI is unconfigured" do
+    Provider::Anthropic.stubs(:configured?).returns(true)
+    Provider::Openai.stubs(:configured?).returns(false)
+    Setting.stubs(:llm_provider).returns("openai")
+
+    assert_equal Provider::Anthropic.effective_model, Chat.default_model
   end
 
   test "creates with configured model when OPENAI_MODEL env is set" do
@@ -57,7 +95,7 @@ class ChatTest < ActiveSupport::TestCase
     with_env_overrides OPENAI_MODEL: "custom-model" do
       chat = @user.chats.start!(prompt, model: "")
 
-      assert_equal "custom-model", chat.messages.first.ai_model
+      assert_equal "custom-model", chat.messages.find_by!(type: "UserMessage").ai_model
     end
   end
 
