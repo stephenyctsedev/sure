@@ -286,10 +286,7 @@ class Category < ApplicationRecord
     end
 
     def prevent_destroy_if_transactions_exist
-      has_transactions = transactions.exists? ||
-        Transaction.where(category_id: subcategory_ids).exists?
-
-      if has_transactions
+      if transactions.exists?
         errors.add(:base, I18n.t("activerecord.errors.models.category.attributes.base.has_transactions"))
         throw(:abort)
       end

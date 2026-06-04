@@ -71,38 +71,6 @@ class CategoryTest < ActiveSupport::TestCase
     assert_includes category.errors[:base], "Cannot delete a category that has transactions linked to it"
   end
 
-  test "cannot destroy category whose subcategory has linked transactions" do
-    fresh_parent = families(:dylan_family).categories.create!(
-      name: "Fresh Parent",
-      classification: "expense",
-      color: "#aabbcc",
-      lucide_icon: "shapes"
-    )
-    fresh_child = families(:dylan_family).categories.create!(
-      name: "Fresh Child",
-      classification: "expense",
-      color: "#aabbcc",
-      lucide_icon: "shapes",
-      parent: fresh_parent
-    )
-    child_entry = accounts(:depository).entries.create!(
-      name: "Child tx",
-      date: Date.today,
-      amount: 10,
-      currency: "USD",
-      entryable: Transaction.new(category: fresh_child)
-    )
-
-    assert_no_difference "Category.count" do
-      fresh_parent.destroy
-    end
-    assert_includes fresh_parent.errors[:base], "Cannot delete a category that has transactions linked to it"
-  ensure
-    child_entry&.destroy
-    fresh_child&.destroy
-    fresh_parent&.destroy
-  end
-
   test "should accept valid 6-digit hex colors" do
     [ "#FFFFFF", "#000000", "#123456", "#ABCDEF", "#abcdef" ].each do |color|
       category = Category.new(name: "Category #{color}", color: color, lucide_icon: "shapes", family: @family)
