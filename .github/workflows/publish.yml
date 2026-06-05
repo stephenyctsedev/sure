@@ -96,6 +96,8 @@ jobs:
           if [[ $GITHUB_EVENT_NAME == "schedule" ]]; then
             BASE_CONFIG+=$'\n'"type=schedule,pattern=nightly"
             BASE_CONFIG+=$'\n'"type=schedule,pattern=nightly-{{date 'ddd'}}"
+          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            BASE_CONFIG+=$'\n'"type=raw,value=latest"
           elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             TAG_NAME="${GITHUB_REF#refs/tags/}"
             if [[ "$TAG_NAME" == v* ]]; then
