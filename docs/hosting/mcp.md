@@ -102,13 +102,48 @@ Sure implements the following JSON-RPC 2.0 methods:
 
 The MCP endpoint exposes these financial tools:
 
+**Accounts**
+
+| Tool | Description |
+|------|-------------|
+| `get_accounts` | Get account information and balances |
+| `get_account` | Retrieve a single account by id |
+| `create_account` | Create a new manual account |
+| `update_account` | Update an account's name, balance, institution, or notes |
+| `sync_accounts` | Trigger a full family sync (rules, provider syncs, transfer matching) |
+
+**Transactions**
+
 | Tool | Description |
 |------|-------------|
 | `get_transactions` | Retrieve transaction history with filtering |
-| `get_accounts` | Get account information and balances |
+| `get_transaction` | Retrieve a single transaction by id |
+| `create_transaction` | Create a new transaction |
+| `update_transaction` | Update an existing transaction |
+| `link_transfer` | Link two existing transactions together as a transfer |
+
+**Categories & tags**
+
+| Tool | Description |
+|------|-------------|
+| `get_categories` | List all categories for the family |
+| `get_category` | Retrieve a single category by id |
+| `create_category` | Create a new category |
+| `update_category` | Update an existing category |
+| `get_category_icons` | List valid Lucide icon codes and palette colors |
+| `get_tags` | List all tags for the family |
+| `create_tag` | Create a new tag |
+| `update_tag` | Update an existing tag |
+
+**Reports & other**
+
+| Tool | Description |
+|------|-------------|
 | `get_holdings` | Query investment holdings |
 | `get_balance_sheet` | Current financial position (assets, liabilities, net worth) |
 | `get_income_statement` | Income and expenses over a period |
+| `get_budget` | Retrieve budget data for a period |
+| `create_goal` | Create a savings/financial goal |
 | `import_bank_statement` | Import bank statement data |
 | `search_family_files` | Search uploaded documents in the vault |
 

@@ -36,7 +36,17 @@ module Assistant
         Function::UpdateTag,
         Function::GetCategories,
         Function::CreateCategory,
-        Function::UpdateCategory
+        Function::UpdateCategory,
+        Function::LinkTransfer,
+        Function::GetAccount,
+        Function::CreateAccount,
+        Function::UpdateAccount,
+        Function::GetTransaction,
+        Function::CreateTransaction,
+        Function::UpdateTransaction,
+        Function::GetCategory,
+        Function::GetCategoryIcons,
+        Function::SyncAccounts
       ]
     end
 
