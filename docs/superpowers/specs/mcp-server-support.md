@@ -1,5 +1,16 @@
 # MCP Server Support for Sure API
 
+> **Status update:** This spec describes a standalone external MCP server that
+> proxies `/api/v1/`. That approach shipped as `sure-mcp-server`, but the tools
+> are now being folded into Sure's **built-in** `/mcp` endpoint
+> (`Assistant.function_classes`) so only one MCP surface is maintained. Tools
+> added to the built-in server so far: `get_account` / `create_account` /
+> `update_account` / `sync_accounts`, `get_transaction` / `create_transaction` /
+> `update_transaction` / `link_transfer`, and `get_category` / `get_category_icons`.
+> Delete tools, chat-management tools, and the proxy's auth/usage tools were
+> intentionally excluded (the built-in endpoint authenticates every call itself).
+> See `docs/hosting/mcp.md` for the current built-in tool list.
+
 ## Overview
 
 Add a Model Context Protocol (MCP) server so that AI assistants (Claude Desktop,
