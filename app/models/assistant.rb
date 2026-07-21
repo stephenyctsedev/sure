@@ -37,7 +37,10 @@ module Assistant
         Function::GetCategories,
         Function::CreateCategory,
         Function::UpdateCategory,
-        Function::LinkTransfer
+        Function::LinkTransfer,
+        Function::GetAccount,
+        Function::CreateAccount,
+        Function::UpdateAccount
       ]
     end
 
