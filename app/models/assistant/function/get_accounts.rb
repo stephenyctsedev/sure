@@ -5,7 +5,11 @@ class Assistant::Function::GetAccounts < Assistant::Function
     end
 
     def description
-      "Use this to see what accounts the user has along with their current and historical balances"
+      <<~INSTRUCTIONS
+        Use this to see what accounts the user has along with their current and historical balances.
+
+        Each result includes an `id` (UUID) that can be passed to get_account or update_account.
+      INSTRUCTIONS
     end
   end
 
@@ -14,6 +18,7 @@ class Assistant::Function::GetAccounts < Assistant::Function
       as_of_date: Date.current,
       accounts: user.accessible_accounts.includes(:balances, :account_providers).map do |account|
         {
+          id: account.id,
           name: account.name,
           balance: account.balance,
           currency: account.currency,

@@ -14,6 +14,9 @@ class Assistant::Function::GetTransactions < Assistant::Function
       <<~INSTRUCTIONS
         Use this to search user's transactions by using various optional filters.
 
+        Each result includes an `id` (UUID) that can be passed to get_transaction or
+        update_transaction.
+
         This function is great for things like:
         - Finding specific transactions
         - Getting basic stats about a small group of transactions
@@ -155,6 +158,7 @@ class Assistant::Function::GetTransactions < Assistant::Function
     normalized_transactions = paginated_transactions.map do |txn|
       entry = txn.entry
       {
+        id: txn.id,
         name: entry.name,
         date: entry.date,
         amount: entry.amount.abs,

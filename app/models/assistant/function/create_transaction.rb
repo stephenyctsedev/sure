@@ -12,8 +12,8 @@ class Assistant::Function::CreateTransaction < Assistant::Function
         amount as income (money in). To be explicit, set nature to "income" or "expense"
         and provide amount as a positive number — the sign will be applied automatically.
 
-        Use get_accounts to find account_id, get_categories for category_id, and
-        get_tags for tag_ids. date must be YYYY-MM-DD.
+        Use get_accounts to find account_id, get_categories for category_id,
+        get_merchants for merchant_id, and get_tags for tag_ids. date must be YYYY-MM-DD.
       INSTRUCTIONS
     end
   end
@@ -57,7 +57,7 @@ class Assistant::Function::CreateTransaction < Assistant::Function
         },
         merchant_id: {
           type: "string",
-          description: "Optional merchant UUID"
+          description: "Optional merchant UUID (from get_merchants)"
         },
         notes: {
           type: "string",
