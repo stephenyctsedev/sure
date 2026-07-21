@@ -40,7 +40,10 @@ module Assistant
         Function::LinkTransfer,
         Function::GetAccount,
         Function::CreateAccount,
-        Function::UpdateAccount
+        Function::UpdateAccount,
+        Function::GetTransaction,
+        Function::CreateTransaction,
+        Function::UpdateTransaction
       ]
     end
 
