@@ -43,7 +43,9 @@ module Assistant
         Function::UpdateAccount,
         Function::GetTransaction,
         Function::CreateTransaction,
-        Function::UpdateTransaction
+        Function::UpdateTransaction,
+        Function::GetCategory,
+        Function::GetCategoryIcons
       ]
     end
 
