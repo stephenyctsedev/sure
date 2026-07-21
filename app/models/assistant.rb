@@ -34,6 +34,7 @@ module Assistant
         Function::GetTags,
         Function::CreateTag,
         Function::UpdateTag,
+        Function::GetMerchants,
         Function::GetCategories,
         Function::CreateCategory,
         Function::UpdateCategory,

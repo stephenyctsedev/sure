@@ -12,7 +12,8 @@ class Assistant::Function::UpdateTransaction < Assistant::Function
         As with create_transaction, a positive amount is an expense and a negative amount
         is income; set nature to "income"/"expense" to apply the sign explicitly.
         Pass tag_ids to replace the transaction's tags (an empty array clears them).
-        Use get_transactions to find transaction ids. date must be YYYY-MM-DD.
+        Use get_transactions to find transaction ids, and get_merchants for merchant_id.
+        date must be YYYY-MM-DD.
       INSTRUCTIONS
     end
   end
@@ -52,7 +53,7 @@ class Assistant::Function::UpdateTransaction < Assistant::Function
         },
         merchant_id: {
           type: "string",
-          description: "New merchant UUID"
+          description: "New merchant UUID (from get_merchants)"
         },
         notes: {
           type: "string",
