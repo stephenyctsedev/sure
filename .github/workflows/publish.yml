@@ -272,18 +272,8 @@ jobs:
       contents: write
 
     steps:
-      - name: Download Android APK artifact
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          name: app-release-apk
-          path: ${{ runner.temp }}/mobile-artifacts
-
-      - name: Download iOS build artifact
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          name: ios-build-unsigned
-          path: ${{ runner.temp }}/ios-build
-
+      # This fork does not build the mobile or desktop apps, so the Helm chart is
+      # the only release asset. See "Remove mobile app build from publish workflow".
       - name: Download Helm chart artifact
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
@@ -355,6 +345,8 @@ jobs:
     steps:
       - name: Determine source branch for tag
         id: source_branch
+        env:
+          TAG_NAME: ${{ github.ref_name }}
         run: |
           # Fetch all branches to find which one contains this tag's commit
           git init --quiet
@@ -365,14 +357,26 @@ jobs:
           BRANCHES=$(git branch -r --contains ${{ github.sha }} | grep -v HEAD | sed 's/origin\///' | xargs)
           echo "Branches containing commit: $BRANCHES"
 
-          # Prefer non-main branches (release branches) over main
+          # Prefer the matching release branch over main. Do not select arbitrary
+          # feature or PR branches that happen to contain the tagged commit.
           SOURCE_BRANCH="main"
+          RELEASE_BRANCH="$(printf '%s\n' "$TAG_NAME" | sed -E 's/^v([0-9]+)\.([0-9]+)\..*/v\1.\2-release-branch/')"
+
           for branch in $BRANCHES; do
-            if [ "$branch" != "main" ] && [ "$branch" != "master" ]; then
+            if [ "$branch" = "$RELEASE_BRANCH" ]; then
               SOURCE_BRANCH="$branch"
               break
             fi
           done
+
+          if [ "$SOURCE_BRANCH" = "main" ]; then
+            for branch in $BRANCHES; do
+              if [[ "$branch" =~ ^v[0-9]+\.[0-9]+-release-branch$ ]]; then
+                SOURCE_BRANCH="$branch"
+                break
+              fi
+            done
+          fi
 
           echo "Selected source branch: $SOURCE_BRANCH"
           echo "branch=$SOURCE_BRANCH" >> $GITHUB_OUTPUT
@@ -440,9 +444,7 @@ jobs:
       - name: Commit and push version bump
         env:
           SOURCE_BRANCH: ${{ steps.source_branch.outputs.branch }}
-          # The organization disallows GITHUB_TOKEN from creating pull requests,
-          # so prefer a dedicated token and fall back to the existing repository PAT.
-          GH_TOKEN: ${{ secrets.VERSION_BUMP_PR_TOKEN || secrets.GH_PAT || github.token }}
+          GH_TOKEN: ${{ github.token }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -527,7 +529,7 @@ jobs:
           if [[ $pr_create_status -ne 0 ]]; then
             echo "::error::Pushed ${BUMP_BRANCH}, but could not create the version bump PR: ${pr_create_output}"
             if grep -q "GitHub Actions is not permitted to create or approve pull requests" <<< "$pr_create_output"; then
-              echo "::notice::Add a VERSION_BUMP_PR_TOKEN or GH_PAT secret with contents, pull requests, and workflows permissions."
+              echo "::notice::Enable the organization setting that allows GitHub Actions to create and approve pull requests."
             fi
             exit 1
           fi

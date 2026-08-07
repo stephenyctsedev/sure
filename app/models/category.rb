@@ -22,6 +22,7 @@ class Category < ApplicationRecord
   before_destroy :prevent_destroy_if_transactions_exist, prepend: true
 
   scope :alphabetically, -> { order(:name) }
+  scope :recently_used, -> { where.not(last_used_at: nil).order(last_used_at: :desc) }
   scope :alphabetically_by_hierarchy, -> {
     left_joins(:parent)
       .order(Arel.sql("COALESCE(parents_categories.name, categories.name)"))
@@ -144,6 +145,28 @@ class Category < ApplicationRecord
   end
 
   class << self
+    def ids_with_transactions(family:, category_ids:)
+      category_ids = Array(category_ids).compact
+      return {} if category_ids.empty?
+
+      family.transactions
+            .where(category_id: category_ids)
+            .distinct
+            .pluck(:category_id)
+            .index_with(true)
+    end
+
+    # Categories a family has manually assigned recently — a shortcut above the
+    # alphabetical list, not a replacement for it. See Transaction#record_category_usage!
+    # for where last_used_at is touched (only on a real human pick via one of the
+    # manual assignment controllers, not rule/import auto-assignment).
+    def recently_used_for(family:, excluding: [], limit: 4)
+      family.categories
+            .recently_used
+            .excluding(Array(excluding).compact)
+            .limit(limit)
+    end
+
     def suggested_icon(name)
       name_down = name.to_s.downcase
 
@@ -291,9 +314,7 @@ class Category < ApplicationRecord
   end
 
   def inherit_color_from_parent
-    if subcategory?
-      self.color = parent.color
-    end
+    self.color = parent.color if subcategory? && parent
   end
 
   def replace_and_destroy!(replacement)
@@ -304,15 +325,22 @@ class Category < ApplicationRecord
   end
 
   def parent?
-    subcategories.any?
+    if association(:subcategories).loaded?
+      subcategories.any?
+    else
+      subcategories.exists?
+    end
   end
 
   def subcategory?
-    parent.present?
+    parent_id.present? && parent.present?
   end
 
   def name_with_parent
-    subcategory? ? "#{parent.name} > #{name}" : name
+    return name unless subcategory?
+
+    parent_name = parent&.name
+    parent_name.present? ? "#{parent_name} > #{name}" : name
   end
 
   def display_name
@@ -340,7 +368,7 @@ class Category < ApplicationRecord
 
   private
     def category_level_limit
-      if (subcategory? && parent.subcategory?) || (parent? && subcategory?)
+      if (subcategory? && parent&.subcategory?) || (parent? && subcategory?)
         errors.add(:parent, "can't have more than 2 levels of subcategories")
       end
     end

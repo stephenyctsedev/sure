@@ -43,6 +43,20 @@ class CategoryTest < ActiveSupport::TestCase
     assert_equal subcategory, transaction.reload.category
   end
 
+  test "invalid parent_id does not raise during validation" do
+    category = Category.new(
+      name: "Orphan Subcategory",
+      color: "#000000",
+      lucide_icon: "folder",
+      family: @family,
+      parent_id: SecureRandom.uuid
+    )
+
+    assert_nothing_raised { category.valid? }
+    assert_not category.subcategory?
+    assert_nil category.parent
+  end
+
   test "subcategory can only be one level deep" do
     category = categories(:subcategory)
 
@@ -134,5 +148,51 @@ class CategoryTest < ActiveSupport::TestCase
       assert_not category.valid?, "#{color} should be invalid"
       assert_includes category.errors[:color], "is invalid"
     end
+  end
+
+  test "ids_with_transactions returns a lookup hash for categorized transactions" do
+    category = categories(:food_and_drink)
+    transaction = Transaction.create!(category: category)
+    Entry.create!(
+      account: accounts(:depository),
+      entryable: transaction,
+      name: "Lookup transaction",
+      date: Date.current,
+      amount: 10,
+      currency: "USD"
+    )
+
+    lookup = Category.ids_with_transactions(family: @family, category_ids: [ category.id, 0 ])
+
+    assert lookup.key?(category.id)
+    assert_not lookup.key?(0)
+  end
+
+  test "recently_used_for orders by last_used_at, most recent first" do
+    older = categories(:income)
+    newer = categories(:food_and_drink)
+    older.update!(last_used_at: 2.days.ago)
+    newer.update!(last_used_at: 1.day.ago)
+
+    assert_equal [ newer, older ], Category.recently_used_for(family: @family).to_a
+  end
+
+  test "recently_used_for excludes categories with no usage yet" do
+    categories(:food_and_drink).update!(last_used_at: 1.day.ago)
+
+    assert_not_includes Category.recently_used_for(family: @family).to_a, categories(:income)
+  end
+
+  test "recently_used_for excludes given categories and respects limit" do
+    a = categories(:income)
+    b = categories(:food_and_drink)
+    c = categories(:subcategory)
+    a.update!(last_used_at: 3.days.ago)
+    b.update!(last_used_at: 2.days.ago)
+    c.update!(last_used_at: 1.day.ago)
+
+    result = Category.recently_used_for(family: @family, excluding: b, limit: 1)
+
+    assert_equal [ c ], result.to_a
   end
 end

@@ -1,5 +1,6 @@
 class PwaController < ApplicationController
   skip_authentication
+  skip_forgery_protection
 
   # The manifest and service worker are public, GET-only static assets that contain
   # no per-user data. With forgery protection active, Rails marks GET requests for

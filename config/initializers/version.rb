@@ -15,8 +15,11 @@ module Sure
     end
 
     private
+      # `.sure-version` is the single source of truth and is written by the
+      # "Release version number" workflow. The literals below are only a last
+      # resort for when that file is missing, so they may lag behind.
       def semver
-        stripped_content = Rails.root.join("0.7.4.4-fix2").read.strip
+        stripped_content = Rails.root.join(".sure-version").read.strip
         stripped_content.presence || "0.7.4.4-fix2"
       rescue Errno::ENOENT
         "0.7.4.4-fix2"

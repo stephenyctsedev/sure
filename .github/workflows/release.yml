@@ -26,10 +26,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Update config/initializers/version.rb
+      # .sure-version is the single source of truth for the app version;
+      # config/initializers/version.rb reads it at boot.
+      - name: Update .sure-version
+        env:
+          VERSION: ${{ github.event.inputs.version }}
         run: |
-          sed -i '/def semver/,/end/{s/"[^"]*"/"${{ github.event.inputs.version }}"/}' \
-            config/initializers/version.rb
+          printf '%s\n' "$VERSION" > .sure-version
+          cat .sure-version
 
       - name: Update charts/sure/Chart.yaml
         run: |
@@ -49,7 +53,7 @@ jobs:
 
       - name: Commit version bump
         run: |
-          git add config/initializers/version.rb charts/sure/Chart.yaml mobile/pubspec.yaml
+          git add .sure-version charts/sure/Chart.yaml mobile/pubspec.yaml
           git commit -m "Bump version to v${{ github.event.inputs.version }}"
 
       - name: Create and push tag

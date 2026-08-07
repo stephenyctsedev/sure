@@ -1,4 +1,8 @@
 class Assistant::Function::UpdateTransaction < Assistant::Function
+  # Fields that change the substance of the transaction rather than annotate it.
+  # Collaborators with only :read_write access may not touch these.
+  SUBSTANTIVE_FIELDS = %w[name amount date nature].freeze
+
   class << self
     def name
       "update_transaction"
@@ -7,13 +11,18 @@ class Assistant::Function::UpdateTransaction < Assistant::Function
     def description
       <<~INSTRUCTIONS
         Updates an existing transaction. Only include the fields you want to change —
-        omitted fields are left as-is.
+        omitted fields are left as-is. Pass null for notes, category_id, or merchant_id
+        to clear them, and pass tag_ids to replace the transaction's tags (an empty
+        array clears them).
 
-        As with create_transaction, a positive amount is an expense and a negative amount
-        is income; set nature to "income"/"expense" to apply the sign explicitly.
-        Pass tag_ids to replace the transaction's tags (an empty array clears them).
-        Use get_transactions to find transaction ids, and get_merchants for merchant_id.
-        date must be YYYY-MM-DD.
+        Use get_transactions first to find the transaction id, and get_categories,
+        get_tags, or get_merchants before referencing related ids.
+
+        A positive amount is an expense and a negative amount is income; set nature to
+        "income"/"expense" to apply the sign explicitly. date must be YYYY-MM-DD.
+
+        It will not edit split child transactions directly, and the amount, date, and
+        type of a split parent cannot be changed here.
       INSTRUCTIONS
     end
   end
@@ -24,103 +33,150 @@ class Assistant::Function::UpdateTransaction < Assistant::Function
 
   def params_schema
     build_schema(
-      required: [ "transaction_id" ],
+      required: [ "id" ],
       properties: {
-        transaction_id: {
+        id: {
           type: "string",
-          description: "UUID of the transaction to update (from get_transactions)"
-        },
-        amount: {
-          type: "number",
-          description: "New amount. Positive = expense, negative = income, unless nature is set."
+          description: "Transaction ID from get_transactions"
         },
         name: {
           type: "string",
-          description: "New transaction name / payee"
+          description: "New transaction name / payee. Omit to leave unchanged."
+        },
+        amount: {
+          type: "number",
+          description: "New amount. Positive = expense, negative = income, unless nature is set. Omit to leave unchanged."
         },
         date: {
           type: "string",
-          description: "New transaction date in YYYY-MM-DD format"
+          description: "New transaction date in YYYY-MM-DD format. Omit to leave unchanged."
         },
         nature: {
           type: "string",
           description: "Optional. 'income' or 'expense' to set the amount sign explicitly.",
           enum: [ "income", "expense" ]
         },
+        notes: {
+          type: [ "string", "null" ],
+          description: "New transaction notes. Use null to clear notes. Omit to leave unchanged."
+        },
         category_id: {
-          type: "string",
-          description: "New category UUID (from get_categories)"
+          type: [ "string", "null" ],
+          description: "Category ID from get_categories. Use null to clear category. Omit to leave unchanged."
         },
         merchant_id: {
-          type: "string",
-          description: "New merchant UUID (from get_merchants)"
-        },
-        notes: {
-          type: "string",
-          description: "New free-text notes"
+          type: [ "string", "null" ],
+          description: "Merchant ID from get_merchants. Use null to clear merchant. Omit to leave unchanged."
         },
         tag_ids: {
           type: "array",
-          description: "Replace the transaction's tags with these tag UUIDs. Empty array clears tags.",
-          items: { type: "string" }
+          items: { type: "string" },
+          description: "Full list of tag IDs to set. Use an empty array to clear all tags. Omit to leave unchanged."
         }
       }
     )
   end
 
   def call(params = {})
-    transaction_id = params["transaction_id"].to_s
-    return error("not_found", "Transaction with id '#{transaction_id}' not found.") unless valid_uuid?(transaction_id)
+    params = normalize_params(params)
+    id = params["id"].to_s
 
-    transaction = accessible_transactions.find_by(id: transaction_id)
-    return error("not_found", "Transaction with id '#{transaction_id}' not found.") unless transaction
+    transaction = find_transaction(id)
+    return error("not_found", "Transaction with id '#{id}' not found.") unless transaction
 
     entry = transaction.entry
+    return error("split_child", "Split child transactions cannot be edited directly. Use the split editor.") if entry.split_child?
 
-    return error("validation_failed", "Split child transactions cannot be edited directly.") if entry.split_child?
-
-    if entry.split_parent? && (params.key?("amount") || params.key?("date") || params.key?("nature"))
+    if entry.split_parent? && SUBSTANTIVE_FIELDS.excluding("name").any? { |field| params.key?(field) }
       return error("validation_failed", "Split parent amount, date, and type cannot be changed directly.")
     end
 
-    entryable_attributes = { id: entry.entryable_id }
-    entryable_attributes[:category_id] = params["category_id"] if params.key?("category_id")
-    entryable_attributes[:merchant_id] = params["merchant_id"] if params.key?("merchant_id")
+    return error("not_authorized", "You do not have permission to update this transaction.") unless permitted_to_update?(entry.account, params)
 
-    entry_attrs = { entryable_attributes: entryable_attributes }
-    entry_attrs[:name] = params["name"] if params.key?("name")
-    entry_attrs[:date] = params["date"] if params.key?("date")
-    entry_attrs[:notes] = params["notes"] if params.key?("notes")
-    entry_attrs[:amount] = signed_amount(params["amount"], params["nature"]) if params["amount"].present?
+    entry_attrs = entry_attributes(params, entry)
+    return entry_attrs if error_response?(entry_attrs)
 
-    updated = false
-    Entry.transaction do
-      if entry.update(entry_attrs)
-        if params.key?("tag_ids")
-          transaction.tag_ids = params["tag_ids"] || []
-          transaction.save!
-          transaction.lock_attr!(:tag_ids) if transaction.tags.any?
-        end
-        entry.sync_account_later
-        entry.lock_saved_attributes!
-        updated = true
-      else
-        raise ActiveRecord::Rollback
-      end
+    tag_ids = nil
+    if params.key?("tag_ids")
+      tag_ids = Array(params["tag_ids"]).map(&:to_s).reject(&:blank?)
+      return error("invalid_tags", "One or more tag_ids do not belong to the user's family.") unless valid_tag_ids?(tag_ids)
     end
 
-    return error("validation_failed", entry.errors.full_messages.join("; ")) unless updated
+    return error("no_changes", "Provide at least one field to update.") if no_changes?(entry_attrs, params)
 
-    { success: true, transaction: serialize(entry.reload.transaction), message: "Transaction '#{entry.name}' updated." }
-  rescue => e
-    error("unexpected_error", e.message)
+    Entry.transaction do
+      entry.update!(entry_attrs)
+
+      if params.key?("tag_ids")
+        transaction.tag_ids = tag_ids
+        transaction.save!
+        transaction.lock_attr!(:tag_ids)
+      end
+
+      entry.sync_account_later
+      entry.lock_saved_attributes!
+    end
+
+    {
+      success: true,
+      transaction: serialize(transaction.reload),
+      message: "Transaction '#{transaction.entry.name}' updated."
+    }
+  rescue ActiveRecord::RecordInvalid => e
+    error("validation_failed", e.record.errors.full_messages.join("; "))
   end
 
   private
-    def accessible_transactions
+    # `transaction_id` is accepted as an alias for `id` so callers written against
+    # the sibling get_transaction / link_transfer tools keep working.
+    def normalize_params(params)
+      normalized = params.to_h.transform_keys(&:to_s)
+      normalized["id"] = normalized["transaction_id"] if !normalized.key?("id") && normalized.key?("transaction_id")
+      normalized
+    end
+
+    def find_transaction(id)
+      return nil unless valid_uuid?(id)
+
       family.transactions
-        .joins(entry: :account)
-        .merge(Account.accessible_by(user))
+        .joins(:entry)
+        .where(entries: { account_id: user.accessible_accounts.visible.select(:id) })
+        .find_by(id: id)
+    end
+
+    def permitted_to_update?(account, params)
+      permission = account.permission_for(user)
+      return true if permission.in?([ :owner, :full_control ])
+
+      permission == :read_write && SUBSTANTIVE_FIELDS.none? { |field| params.key?(field) }
+    end
+
+    def entry_attributes(params, entry)
+      entryable_attrs = { id: entry.entryable_id }
+
+      if params.key?("category_id")
+        category_id = optional_uuid(params["category_id"])
+        return category_id if error_response?(category_id)
+        return error("invalid_category", "category_id does not belong to the user's family.") if category_id && !family.categories.exists?(id: category_id)
+
+        entryable_attrs[:category_id] = category_id
+      end
+
+      if params.key?("merchant_id")
+        merchant_id = optional_uuid(params["merchant_id"])
+        return merchant_id if error_response?(merchant_id)
+        return error("invalid_merchant", "merchant_id is not available to the user's family.") if merchant_id && !available_merchants.exists?(id: merchant_id)
+
+        entryable_attrs[:merchant_id] = merchant_id
+      end
+
+      attrs = {}
+      attrs[:name] = params["name"].to_s.strip if params.key?("name")
+      attrs[:notes] = params["notes"] if params.key?("notes")
+      attrs[:date] = params["date"] if params.key?("date")
+      attrs[:amount] = signed_amount(params["amount"], params["nature"]) if params["amount"].present?
+      attrs[:entryable_attributes] = entryable_attrs if entryable_attrs.keys.size > 1
+      attrs
     end
 
     def signed_amount(amount, nature)
@@ -132,10 +188,29 @@ class Assistant::Function::UpdateTransaction < Assistant::Function
       end
     end
 
-    def serialize(txn)
-      entry = txn.entry
+    def optional_uuid(value)
+      return nil if value.nil? || value == ""
+      return value.to_s if valid_uuid?(value)
+
+      error("invalid_uuid", "Expected a valid UUID.")
+    end
+
+    def valid_tag_ids?(tag_ids)
+      family.tags.where(id: tag_ids).count == tag_ids.uniq.size
+    end
+
+    def available_merchants
+      family.available_merchants_for(user)
+    end
+
+    def no_changes?(entry_attrs, params)
+      entry_attrs.empty? && !params.key?("tag_ids")
+    end
+
+    def serialize(transaction)
+      entry = transaction.entry
       {
-        id: txn.id,
+        id: transaction.id,
         name: entry.name,
         date: entry.date,
         amount: entry.amount.abs,
@@ -144,12 +219,21 @@ class Assistant::Function::UpdateTransaction < Assistant::Function
         classification: entry.amount.negative? ? "income" : "expense",
         account: entry.account.name,
         account_id: entry.account_id,
-        category: txn.category&.name,
-        category_id: txn.category_id,
-        merchant: txn.merchant&.name,
         notes: entry.notes,
-        tags: txn.tags.map(&:name)
+        category: transaction.category && {
+          id: transaction.category.id,
+          name: transaction.category.name
+        },
+        merchant: transaction.merchant && {
+          id: transaction.merchant.id,
+          name: transaction.merchant.name
+        },
+        tags: transaction.tags.map { |tag| { id: tag.id, name: tag.name } }
       }
+    end
+
+    def error_response?(value)
+      value.is_a?(Hash) && value[:success] == false
     end
 
     def error(key, message)

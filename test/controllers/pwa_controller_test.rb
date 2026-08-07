@@ -24,4 +24,15 @@ class PwaControllerTest < ActionDispatch::IntegrationTest
   ensure
     ActionController::Base.allow_forgery_protection = original
   end
+
+  test "service worker responds successfully without origin or referer headers" do
+    get "/service-worker", headers: {
+      "Accept" => "*/*",
+      "DNT" => "1",
+      "Sec-GPC" => "1"
+    }
+
+    assert_response :success
+    assert_equal "application/javascript", response.media_type
+  end
 end
