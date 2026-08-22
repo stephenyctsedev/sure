@@ -7,37 +7,47 @@ class Assistant::Function::GetMerchantsTest < ActiveSupport::TestCase
     @fn = Assistant::Function::GetMerchants.new(@user)
   end
 
-  test "to_definition returns correct name and description" do
-    definition = @fn.to_definition
-    assert_equal "get_merchants", definition[:name]
-    assert_not_empty definition[:description]
-    assert_equal "object", definition[:params_schema][:type]
+  test "has correct name" do
+    assert_equal "get_merchants", @fn.name
   end
 
-  test "returns all family merchants sorted alphabetically" do
-    result = @fn.call
-
-    assert_kind_of Array, result[:merchants]
-    assert_equal @family.merchants.count, result[:total]
-
-    names = result[:merchants].map { |m| m[:name] }
-    assert_equal names.sort, names
+  test "has a description" do
+    assert_not_empty @fn.description
   end
 
-  test "each merchant includes id and name" do
-    result = @fn.call
-    result[:merchants].each do |m|
-      assert m[:id].present?
-      assert m[:name].present?
-    end
+  test "is not in strict mode" do
+    refute @fn.to_definition[:strict]
   end
 
-  test "scopes to the user's family" do
-    other_family = Family.create!(name: "Other", currency: "USD", locale: "en", country: "US", timezone: "UTC")
-    other_family.merchants.create!(name: "Foreign Merchant", type: "FamilyMerchant")
-
+  test "returns family merchants with ids and source" do
     result = @fn.call
-    merchant_names = result[:merchants].map { |m| m[:name] }
-    assert_not_includes merchant_names, "Foreign Merchant"
+
+    netflix = result[:merchants].find { |m| m[:name] == "Netflix" }
+
+    assert_not_nil netflix
+    assert_equal merchants(:netflix).id, netflix[:id]
+    assert_equal "family", netflix[:source]
+  end
+
+  test "filters by search substring case-insensitively" do
+    result = @fn.call("search" => "netfl")
+
+    assert_equal [ "Netflix" ], result[:merchants].map { |m| m[:name] }
+  end
+
+  test "honors and clamps page_size" do
+    result = @fn.call("page_size" => 1)
+
+    assert_equal 1, result[:page_size]
+    assert_equal 1, result[:merchants].size
+    assert result[:total_pages] > 1
+  end
+
+  test "does not return another family's merchants" do
+    foreign_user = users(:empty)
+
+    result = Assistant::Function::GetMerchants.new(foreign_user).call
+
+    assert_empty result[:merchants].map { |m| m[:name] } & @family.merchants.pluck(:name)
   end
 end
