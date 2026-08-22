@@ -12,8 +12,11 @@ class Assistant::Function::GetTransactionsTest < ActiveSupport::TestCase
     definition = @function.to_definition
     assert_equal "get_transactions", definition[:name]
     assert_not_empty definition[:description]
-    assert_includes definition[:params_schema][:required], "order"
-    assert_includes definition[:params_schema][:required], "page"
+    # order/page are optional: the function is not strict and both have
+    # documented defaults (page 1, order desc).
+    assert_not definition[:strict]
+    assert_includes definition[:params_schema][:properties].keys, :order
+    assert_includes definition[:params_schema][:properties].keys, :page
   end
 
   test "each transaction includes an id that resolves via get_transaction" do
