@@ -425,7 +425,7 @@ class RecurringTransactionTest < ActiveSupport::TestCase
     # Create name-based pattern (no merchant)
     [ 0, 1, 2 ].each do |months_ago|
       transaction = Transaction.create!(
-        category: categories(:one)
+        category: categories(:subcategory)
       )
       @account.entries.create!(
         date: months_ago.months.ago.beginning_of_month + 1.days,

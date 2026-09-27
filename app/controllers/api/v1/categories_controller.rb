@@ -158,11 +158,18 @@ class Api::V1::CategoriesController < Api::V1::BaseController
   end
 
   def destroy
-    if @category.destroy
+    # The API refuses to orphan transactions; the web UI instead offers a
+    # replacement category via Category::DeletionsController.
+    if @category.transactions.exists?
+      render json: {
+        error: "category_has_transactions",
+        message: I18n.t("activerecord.errors.models.category.attributes.base.has_transactions")
+      }, status: :unprocessable_entity
+    elsif @category.destroy
       render json: { message: "Category deleted successfully" }, status: :ok
     else
       render json: {
-        error: "category_has_transactions",
+        error: "validation_failed",
         message: @category.errors.full_messages.to_sentence
       }, status: :unprocessable_entity
     end

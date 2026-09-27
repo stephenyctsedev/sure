@@ -29,7 +29,6 @@ class Category < ApplicationRecord
   validate :category_level_limit
 
   before_save :inherit_color_from_parent
-  before_destroy :prevent_destroy_if_transactions_exist, prepend: true
 
   scope :alphabetically, -> { order(:name) }
   scope :recently_used, -> { where.not(last_used_at: nil).order(last_used_at: :desc) }
@@ -422,13 +421,6 @@ class Category < ApplicationRecord
     def nested_category_matches_parent_classification
       if subcategory? && parent.classification != classification
         errors.add(:parent, "must have the same classification as its parent")
-      end
-    end
-
-    def prevent_destroy_if_transactions_exist
-      if transactions.exists?
-        errors.add(:base, I18n.t("activerecord.errors.models.category.attributes.base.has_transactions"))
-        throw(:abort)
       end
     end
 
