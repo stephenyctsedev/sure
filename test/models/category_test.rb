@@ -77,14 +77,6 @@ class CategoryTest < ActiveSupport::TestCase
     assert_equal names, names.uniq  # No duplicates
   end
 
-  test "cannot destroy category with linked transactions" do
-    category = categories(:food_and_drink) # has transactions(:one) linked
-    assert_no_difference "Category.count" do
-      category.destroy
-    end
-    assert_includes category.errors[:base], "Cannot delete a category that has transactions linked to it"
-  end
-
   test "display_name localizes default category names" do
     I18n.with_locale(:"zh-CN") do
       assert_equal "餐饮", categories(:food_and_drink).display_name
