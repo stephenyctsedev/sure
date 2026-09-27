@@ -53,9 +53,7 @@ class UpAccount::Transactions::CategoryMatcherTest < ActiveSupport::TestCase
   end
 
   test "does not match when the family has none of the target categories" do
-    bare_family = families(:dylan_family)
-    bare_family.categories.destroy_all
-    matcher = UpAccount::Transactions::CategoryMatcher.new(bare_family.categories.reload.to_a)
+    matcher = UpAccount::Transactions::CategoryMatcher.new(@family.categories.where.not(name: "Groceries").to_a)
 
     assert_nil matcher.match("groceries"), "no Groceries category exists, so no match"
   end
