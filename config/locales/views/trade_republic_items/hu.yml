@@ -6,6 +6,7 @@ hu:
       connection_description: "Trade Republic befektetési számla összekapcsolása biztonságos webes bejelentkezéssel"
       institution_name: Trade Republic
   trade_republic_items:
+    duplicate_connection: "Ez a Trade Republic-fiók már csatlakoztatva van. Az új kapcsolat törölve lett."
     portfolio_categories:
       brokerage: "Brókerszámla"
       private_markets: "Privát piacok"
@@ -14,6 +15,7 @@ hu:
     trade_republic_item:
       syncing: "Szinkronizálás"
       requires_update: "Újrahitelesítés szükséges"
+      session_expires_in: "A bejelentkezés %{time} múlva lejár (%{at})."
       error: "Hiba"
       synced: "Szinkronizálva: %{time}. %{summary}."
       setup_accounts: "Fiókok beállítása"

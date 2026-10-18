@@ -14,6 +14,7 @@ uk:
     trade_republic_item:
       syncing: "Синхронізація"
       requires_update: "Потрібна повторна автентифікація"
+      session_expires_in: "Вхід завершиться через %{time} (%{at})."
       error: "Помилка"
       synced: "Синхронізовано %{time} тому. %{summary}."
       setup_accounts: "Налаштувати рахунки"
@@ -166,6 +167,7 @@ uk:
         card_refund: Повернення на картку
         tax_refund: Повернення податку
         round_up: Round up
+    duplicate_connection: "Цей рахунок Trade Republic уже підключено. Нове підключення видалено."
     defaults:
       name: Trade Republic
     sync_status:

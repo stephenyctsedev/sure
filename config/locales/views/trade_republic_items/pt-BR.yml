@@ -6,6 +6,7 @@ pt-BR:
       connection_description: "Conecte uma conta de investimentos da Trade Republic por meio de login web seguro"
       institution_name: Trade Republic
   trade_republic_items:
+    duplicate_connection: "Esta conta da Trade Republic já está conectada. A nova conexão foi removida."
     portfolio_categories:
       brokerage: "Conta de corretora"
       private_markets: "Mercados privados"
@@ -14,6 +15,7 @@ pt-BR:
     trade_republic_item:
       syncing: "Sincronizando"
       requires_update: "É necessário reautenticar"
+      session_expires_in: "O login expira em %{time} (%{at})."
       error: "Erro"
       synced: "Sincronizado há %{time}. %{summary}."
       setup_accounts: "Configurar contas"

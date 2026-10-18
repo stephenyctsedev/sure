@@ -14,6 +14,7 @@ ru:
     trade_republic_item:
       syncing: "Синхронизация"
       requires_update: "Требуется повторная аутентификация"
+      session_expires_in: "Вход истекает через %{time} (%{at})."
       error: "Ошибка"
       synced: "Синхронизировано %{time} назад. %{summary}."
       setup_accounts: "Настроить счета"
@@ -166,6 +167,7 @@ ru:
         card_refund: Возврат на карту
         tax_refund: Налоговый возврат
         round_up: Round up
+    duplicate_connection: "Этот счёт Trade Republic уже подключён. Новое подключение удалено."
     defaults:
       name: Trade Republic
     sync_status:

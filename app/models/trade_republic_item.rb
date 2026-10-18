@@ -22,9 +22,17 @@ class TradeRepublicItem < ApplicationRecord
   validates :phone_number, presence: true, unless: -> { requires_update? || session_configured? }
 
   scope :active, -> { where(scheduled_for_deletion: false) }
-  scope :syncable, -> { active.where(status: :good, pending_login_state: nil).where.not(session_blob: [ nil, "" ]) }
+  # Matches ready_for_sync?: a session without a known end (stored before
+  # session_expires_at existed) stays syncable until its next save sets one.
+  scope :syncable, -> {
+    active.where(status: :good, pending_login_state: nil).where.not(session_blob: [ nil, "" ])
+      .where("trade_republic_items.session_expires_at IS NULL OR trade_republic_items.session_expires_at > ?", Time.current)
+  }
   scope :ordered, -> { order(created_at: :desc) }
   scope :needs_update, -> { where(status: :requires_update) }
+
+  before_save :set_session_expires_at, if: -> { session_blob_changed? || (session_expires_at.nil? && session_configured?) }
+  after_commit :schedule_sync_before_session_expires, if: -> { saved_change_to_session_expires_at? && session_expires_at.present? }
 
   # Reloading represents a new persisted state; never carry an authentication
   # PIN across that boundary in the in-memory model instance.
@@ -40,8 +48,16 @@ class TradeRepublicItem < ApplicationRecord
     session_blob.present?
   end
 
+  def session_expired?
+    session_configured? && session_expires_at.present? && session_expires_at <= Time.current
+  end
+
+  def needs_login?
+    requires_update? || session_expired?
+  end
+
   def ready_for_sync?
-    good? && pending_login_state.blank? && session_configured?
+    good? && pending_login_state.blank? && session_configured? && !session_expired?
   end
 
   def import_latest_data
@@ -64,11 +80,16 @@ class TradeRepublicItem < ApplicationRecord
   def process_accounts
     return [] if trade_republic_accounts.empty?
 
-    # Portfolio before cash so Saveback trades exist before cash reconciliation
-    # removes legacy Saveback withdrawals in the same process_accounts pass.
+    # Portfolio and Crypto before cash so Saveback trades exist before cash
+    # reconciliation removes legacy Saveback withdrawals in the same
+    # process_accounts pass, and cash settlements find the trade they link to.
+    # The accounts are processed without a spanning transaction: each pass
+    # derives its entries and reconciliations from the stored snapshots, so
+    # when one account fails, the next successful sync repairs any trade or
+    # settlement counterpart left halfway through a move.
     linked_trade_republic_accounts
       .includes(account_provider: :account)
-      .order(Arel.sql("CASE kind WHEN 'portfolio' THEN 0 WHEN 'cash' THEN 1 ELSE 2 END"), :id)
+      .order(Arel.sql("CASE kind WHEN 'portfolio' THEN 0 WHEN 'crypto' THEN 1 WHEN 'cash' THEN 2 ELSE 3 END"), :id)
       .each_with_object([]) do |tr_account, results|
       account = tr_account.current_account
       next unless account
@@ -191,7 +212,7 @@ class TradeRepublicItem < ApplicationRecord
       account = provider_account.current_account
       next if account.blank?
 
-      expected = provider_account.current_balance.to_d
+      expected = provider_account.account_balance.to_d
       actual = account.balance.to_d
       difference = (expected - actual).abs
       {
@@ -218,4 +239,14 @@ class TradeRepublicItem < ApplicationRecord
       days: days
     }
   end
+
+  private
+
+    def set_session_expires_at
+      self.session_expires_at = session_configured? ? Provider::TradeRepublicSession.expires_at(session_blob) : nil
+    end
+
+    def schedule_sync_before_session_expires
+      TradeRepublicPreExpirySyncJob.schedule_for(self)
+    end
 end

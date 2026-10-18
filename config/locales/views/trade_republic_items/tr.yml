@@ -14,6 +14,7 @@ tr:
     trade_republic_item:
       syncing: "Senkronize ediliyor"
       requires_update: "Yeniden kimlik doğrulama gerekli"
+      session_expires_in: "Girişin süresi %{time} içinde doluyor (%{at})."
       error: "Hata"
       synced: "%{time} önce senkronize edildi. %{summary}."
       setup_accounts: "Hesapları kur"
@@ -148,6 +149,7 @@ tr:
         card_refund: Kart iadesi
         tax_refund: Vergi iadesi
         round_up: Round up
+    duplicate_connection: "Bu Trade Republic hesabı zaten bağlı. Yeni bağlantı kaldırıldı."
     defaults:
       name: Trade Republic
     sync_status:

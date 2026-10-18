@@ -6,6 +6,7 @@ it:
       connection_description: "Collega un conto d’investimento Trade Republic tramite accesso web sicuro"
       institution_name: Trade Republic
   trade_republic_items:
+    duplicate_connection: "Questo conto Trade Republic è già collegato. La nuova connessione è stata rimossa."
     portfolio_categories:
       brokerage: "Conto di intermediazione"
       private_markets: "Mercati privati"
@@ -14,6 +15,7 @@ it:
     trade_republic_item:
       syncing: "Sincronizzazione"
       requires_update: "Nuova autenticazione richiesta"
+      session_expires_in: "L'accesso scade tra %{time} (%{at})."
       error: "Errore"
       synced: "Sincronizzato %{time} fa. %{summary}."
       setup_accounts: "Configura i conti"

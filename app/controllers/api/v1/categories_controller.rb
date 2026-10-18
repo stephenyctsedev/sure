@@ -3,12 +3,13 @@
 class Api::V1::CategoriesController < Api::V1::BaseController
   include Pagy::Backend
 
-  before_action :ensure_read_scope, only: [ :index, :show ]
-  before_action :ensure_write_scope, only: [ :create, :update, :destroy ]
-  before_action :set_category, only: [ :show, :update, :destroy ]
-  skip_before_action :authenticate_request!, only: [ :icons ]
-  skip_before_action :check_api_key_rate_limit, only: [ :icons ]
-  skip_before_action :log_api_access, only: [ :icons ]
+  before_action :ensure_read_scope, only: %i[index show]
+  before_action :ensure_write_scope, only: %i[create update destroy]
+  before_action :reject_guest_writes!, only: %i[create update destroy]
+  before_action :set_category, only: %i[show update destroy]
+  skip_before_action :authenticate_request!, only: :icons
+  skip_before_action :check_api_key_rate_limit, only: :icons
+  skip_before_action :log_api_access, only: :icons
 
   def index
     family = current_resource_owner.family
