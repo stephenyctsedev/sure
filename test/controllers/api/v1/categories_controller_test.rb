@@ -272,7 +272,7 @@ class Api::V1::CategoriesControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "create cannot use another family's category as parent" do
-    other_family_root = categories(:one) # belongs to :empty family
+    other_family_root = create_other_family_category
 
     post "/api/v1/categories",
       params: { category: { name: "Coffee", classification: "expense", parent_id: other_family_root.id } },
@@ -350,7 +350,7 @@ class Api::V1::CategoriesControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "update returns 404 for another family's category" do
-    other_category = categories(:one) # belongs to :empty family
+    other_category = create_other_family_category
 
     patch "/api/v1/categories/#{other_category.id}",
       params: { category: { name: "X" } },
@@ -474,7 +474,7 @@ class Api::V1::CategoriesControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "destroy returns 404 for another family's category" do
-    other_category = categories(:one) # belongs to :empty family
+    other_category = create_other_family_category
 
     delete "/api/v1/categories/#{other_category.id}", headers: api_headers(read_write_api_key)
     assert_response :not_found
@@ -577,6 +577,10 @@ class Api::V1::CategoriesControllerTest < ActionDispatch::IntegrationTest
   end
 
   private
+
+    def create_other_family_category
+      families(:empty).categories.create!(name: "Other Family Category", color: "#FF0000")
+    end
 
     def read_write_api_key
       @read_write_api_key ||= ApiKey.create!(

@@ -40,7 +40,9 @@ class Assistant::Function::GetCategoryTest < ActiveSupport::TestCase
   end
 
   test "does not return categories from another family" do
-    result = @fn.call("category_id" => categories(:one).id)
+    other_category = families(:empty).categories.create!(name: "Foreign", color: "#e99537")
+
+    result = @fn.call("category_id" => other_category.id)
 
     assert_equal false, result[:success]
     assert_equal "not_found", result[:error]
