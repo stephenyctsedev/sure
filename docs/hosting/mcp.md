@@ -161,7 +161,8 @@ At the time of writing, `tools/list` includes:
 | `get_categories` | Categories with hierarchy and pagination |
 | `get_category` | Retrieve a single category by id |
 | `create_category` | Create a new category |
-| `update_category` | Update an existing category |
+| `update_category` | Update an existing category: rename, recolor, or move between parents |
+| `delete_category` | Delete a category, optionally moving its transactions to a replacement |
 | `get_category_icons` | List valid Lucide icon codes and palette colors |
 | `get_tags` | Tags with pagination |
 | `create_tag` | Create a new tag |
@@ -180,6 +181,10 @@ At the time of writing, `tools/list` includes:
 | `create_goal` | Create a savings goal linked to depository accounts |
 | `set_opening_balance` | Set a manual account's opening balance and the date it applies from, reporting whether the current balance changes. Supports `dry_run` |
 | `unmatch_transfer` | Unlink a confirmed or pending transfer (by either transaction's id) so a wrong match can be redone; rejects the pairing for auto-match by default. Supports `dry_run` |
+| `update_transfer` | Switch a confirmed transfer into an investment or crypto account between an investment contribution (counted as spending) and a plain transfer, e.g. when a brokerage or crypto account only converts currency. Supports `dry_run` |
+| `get_transfer_match_candidates` | A transaction's current transfer (including a pending auto-match) or the transactions it could be matched with, as in the "Match transfer" dialog |
+| `match_transfer` | Match a transaction as a transfer with an existing counterpart, or create the counterpart in a target account (e.g. a manual loan). Supports `dry_run` |
+| `review_transfer` | Confirm or reject a pending auto-matched transfer |
 
 **Rules**
 

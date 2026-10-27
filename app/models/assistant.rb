@@ -41,7 +41,8 @@ module Assistant
     Function::CreateTag,
     Function::UpdateTag,
     Function::CreateCategory,
-    Function::UpdateCategory
+    Function::UpdateCategory,
+    Function::DeleteCategory
   ].freeze
 
   class << self
@@ -76,6 +77,7 @@ module Assistant
         Function::CreateGoal,
         Function::SetOpeningBalance,
         Function::UnmatchTransfer,
+        Function::UpdateTransfer,
         Function::GetTags,
         Function::CreateTag,
         Function::UpdateTag,
@@ -83,6 +85,7 @@ module Assistant
         Function::GetCategories,
         Function::CreateCategory,
         Function::UpdateCategory,
+        Function::DeleteCategory,
         Function::GetRules,
         Function::GetRuleOptions,
         Function::PreviewRule,
@@ -100,6 +103,9 @@ module Assistant
         Function::GetCategoryIcons,
         Function::SyncAccounts,
         Function::DeleteTransaction,
+        Function::GetTransferMatchCandidates,
+        Function::MatchTransfer,
+        Function::ReviewTransfer,
         Function::UpdateBudget
       ]
 
